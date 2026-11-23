@@ -108,15 +108,18 @@ def test_directory_file_count_and_total_size(tmp_path: Path):
     save_uploaded_file(root, "inputs/sub", "b.png", b"1234567890")
 
     root_listing = list_directory(root, "")
+    assert root_listing["currentFileCount"] == 2
+    assert root_listing["currentSize"] == 15
+
     inputs_entry = next(e for e in root_listing["entries"] if e["name"] == "inputs")
     assert inputs_entry["isDir"] is True
     assert inputs_entry["fileCount"] == 2
     assert inputs_entry["size"] == 15
 
-    inputs_shortcut = next(s for s in root_listing["shortcuts"] if s["id"] == "inputs")
-    assert inputs_shortcut["fileCount"] == 2
-    assert inputs_shortcut["size"] == 15
+    inputs_listing = list_directory(root, "inputs")
+    assert inputs_listing["currentFileCount"] == 2
+    assert inputs_listing["currentSize"] == 15
 
-    root_shortcut = next(s for s in root_listing["shortcuts"] if s["id"] == "root")
-    assert root_shortcut["fileCount"] == 2
-    assert root_shortcut["size"] == 15
+    sub_listing = list_directory(root, "inputs/sub")
+    assert sub_listing["currentFileCount"] == 1
+    assert sub_listing["currentSize"] == 10

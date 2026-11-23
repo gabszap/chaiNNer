@@ -21,8 +21,8 @@ export interface WebShortcutEntry {
     id: string;
     name: string;
     path: string;
-    size: number;
-    fileCount: number;
+    size?: number;
+    fileCount?: number;
 }
 
 export interface WebDirectoryListing {
@@ -30,6 +30,8 @@ export interface WebDirectoryListing {
     currentPath: string;
     relativePath: string;
     parentPath: string | null;
+    currentFileCount?: number;
+    currentSize?: number;
     breadcrumbs: WebBreadcrumb[];
     shortcuts: WebShortcutEntry[];
     entries: WebFileEntry[];

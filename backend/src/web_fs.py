@@ -46,8 +46,6 @@ class ShortcutEntry(TypedDict):
     id: str
     name: str
     path: str
-    size: int
-    fileCount: int
 
 
 class DirectoryListing(TypedDict):
@@ -55,6 +53,8 @@ class DirectoryListing(TypedDict):
     currentPath: str
     relativePath: str
     parentPath: str | None
+    currentFileCount: int
+    currentSize: int
     breadcrumbs: list[Breadcrumb]
     shortcuts: list[ShortcutEntry]
     entries: list[FileEntry]
@@ -228,34 +228,22 @@ def list_directory(
         None if target == resolved_root else str(target.parent.resolve())
     )
 
-    root_files, root_size = _compute_dir_stats(resolved_root, resolved_root)
+    current_files, current_size = _compute_dir_stats(target, resolved_root)
+
     shortcuts: list[ShortcutEntry] = [
-        {
-            "id": "root",
-            "name": "Raiz",
-            "path": str(resolved_root),
-            "size": root_size,
-            "fileCount": root_files,
-        }
+        {"id": "root", "name": "Raiz", "path": str(resolved_root)},
     ]
     for sub in DEFAULT_SUBDIRS:
         sub_path = (resolved_root / sub).resolve()
-        sub_files, sub_size = _compute_dir_stats(sub_path, resolved_root)
-        shortcuts.append(
-            {
-                "id": sub,
-                "name": sub,
-                "path": str(sub_path),
-                "size": sub_size,
-                "fileCount": sub_files,
-            }
-        )
+        shortcuts.append({"id": sub, "name": sub, "path": str(sub_path)})
 
     return {
         "root": str(resolved_root),
         "currentPath": str(target),
         "relativePath": _to_relative_posix(resolved_root, target),
         "parentPath": parent_path,
+        "currentFileCount": current_files,
+        "currentSize": current_size,
         "breadcrumbs": breadcrumbs,
         "shortcuts": shortcuts,
         "entries": entries,

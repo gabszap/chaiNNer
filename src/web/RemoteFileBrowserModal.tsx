@@ -76,8 +76,8 @@ const formatFileSize = (bytes: number): string => {
 };
 
 const formatFileCount = (count: number): string => {
-    if (count === 0) return 'vazia';
-    return count === 1 ? '1 arq.' : `${count} arqs.`;
+    if (count === 1) return '1 arquivo';
+    return `${count} arquivos`;
 };
 
 const formatDate = (ms: number): string => {
@@ -186,6 +186,43 @@ export const RemoteFileBrowserModal = memo(
                 PROTECTED_TOP_DIRS.has(primarySelectedEntry.relativePath)
             );
         }, [primarySelectedEntry]);
+
+        const footerFolderInfo = useMemo(() => {
+            if (primarySelectedEntry?.isDir) {
+                return {
+                    path: primarySelectedEntry.path,
+                    fileCount: primarySelectedEntry.fileCount,
+                    size: primarySelectedEntry.size,
+                };
+            }
+            if (!listing) return null;
+
+            let fileCount = listing.currentFileCount;
+            let size = listing.currentSize;
+            if (fileCount === undefined || size === undefined) {
+                const matchingShortcut = listing.shortcuts.find(
+                    (sc) => sc.path === listing.currentPath
+                );
+                if (
+                    matchingShortcut?.fileCount !== undefined &&
+                    matchingShortcut.size !== undefined
+                ) {
+                    fileCount = matchingShortcut.fileCount;
+                    size = matchingShortcut.size;
+                } else {
+                    fileCount = listing.entries.reduce(
+                        (acc, e) => acc + (e.isDir ? e.fileCount : 1),
+                        0
+                    );
+                    size = listing.entries.reduce((acc, e) => acc + e.size, 0);
+                }
+            }
+            return {
+                path: listing.currentPath,
+                fileCount,
+                size,
+            };
+        }, [listing, primarySelectedEntry]);
 
         useEffect(() => {
             setRenaming(false);
@@ -627,7 +664,7 @@ export const RemoteFileBrowserModal = memo(
                                 flexShrink={0}
                                 p={2}
                                 spacing={1}
-                                w="178px"
+                                w="148px"
                             >
                                 <Text
                                     color="var(--fg-300)"
@@ -642,53 +679,18 @@ export const RemoteFileBrowserModal = memo(
                                 {(listing?.shortcuts ?? []).map((sc) => {
                                     const active = listing?.currentPath === sc.path;
                                     return (
-                                        <Tooltip
+                                        <Button
+                                            justifyContent="flex-start"
                                             key={sc.id}
-                                            label={`${sc.name}: ${formatFileCount(
-                                                sc.fileCount
-                                            )} · ${formatFileSize(sc.size)}`}
-                                            placement="right"
+                                            leftIcon={<Icon as={getShortcutIcon(sc.id)} />}
+                                            size="sm"
+                                            variant={active ? 'solid' : 'ghost'}
+                                            onClick={() => {
+                                                fetchDirectory(sc.path).catch(() => undefined);
+                                            }}
                                         >
-                                            <Button
-                                                h="auto"
-                                                justifyContent="space-between"
-                                                px={2}
-                                                py={1.5}
-                                                size="sm"
-                                                variant={active ? 'solid' : 'ghost'}
-                                                onClick={() => {
-                                                    fetchDirectory(sc.path).catch(() => undefined);
-                                                }}
-                                            >
-                                                <HStack
-                                                    minW={0}
-                                                    spacing={2}
-                                                >
-                                                    <Icon as={getShortcutIcon(sc.id)} />
-                                                    <Text isTruncated>{sc.name}</Text>
-                                                </HStack>
-                                                <VStack
-                                                    align="flex-end"
-                                                    flexShrink={0}
-                                                    spacing={0}
-                                                >
-                                                    <Text
-                                                        color="var(--fg-300)"
-                                                        fontSize="10px"
-                                                        lineHeight="1.15"
-                                                    >
-                                                        {sc.fileCount}
-                                                    </Text>
-                                                    <Text
-                                                        color="var(--fg-300)"
-                                                        fontSize="9px"
-                                                        lineHeight="1.15"
-                                                    >
-                                                        {formatFileSize(sc.size)}
-                                                    </Text>
-                                                </VStack>
-                                            </Button>
-                                        </Tooltip>
+                                            {sc.name}
+                                        </Button>
                                     );
                                 })}
                             </VStack>
@@ -797,13 +799,9 @@ export const RemoteFileBrowserModal = memo(
                                                         flexShrink={0}
                                                         fontSize="xs"
                                                         textAlign="right"
-                                                        w="130px"
+                                                        w="80px"
                                                     >
-                                                        {entry.isDir
-                                                            ? `${formatFileCount(
-                                                                  entry.fileCount
-                                                              )} · ${formatFileSize(entry.size)}`
-                                                            : formatFileSize(entry.size)}
+                                                        {formatFileSize(entry.size)}
                                                     </Text>
                                                     <Text
                                                         color="var(--fg-300)"
@@ -1066,16 +1064,33 @@ export const RemoteFileBrowserModal = memo(
                         justifyContent="space-between"
                         py={3}
                     >
-                        <Text
-                            isTruncated
-                            color="var(--fg-300)"
-                            fontFamily="mono"
-                            fontSize="xs"
-                            maxW="65%"
-                            title={listing?.currentPath}
+                        <VStack
+                            align="flex-start"
+                            maxW="68%"
+                            minW={0}
+                            spacing={0.5}
                         >
-                            {listing?.currentPath ?? ''}
-                        </Text>
+                            <Text
+                                isTruncated
+                                color="var(--fg-300)"
+                                fontFamily="mono"
+                                fontSize="xs"
+                                title={footerFolderInfo?.path}
+                                w="full"
+                            >
+                                {footerFolderInfo?.path ?? ''}
+                            </Text>
+                            {footerFolderInfo && (
+                                <Text
+                                    color="var(--fg-300)"
+                                    fontSize="11px"
+                                    opacity={0.85}
+                                >
+                                    {formatFileCount(footerFolderInfo.fileCount)} ·{' '}
+                                    {formatFileSize(footerFolderInfo.size)}
+                                </Text>
+                            )}
+                        </VStack>
                         <HStack spacing={2}>
                             {mode !== 'browse' && (
                                 <Button
