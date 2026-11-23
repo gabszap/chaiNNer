@@ -23,7 +23,7 @@ def get_onnx_runtime():
             display_name="ONNX Runtime (GPU)",
             pypi_name="onnxruntime-gpu",
             version="1.17.1",
-            size_estimate=120 * MB,
+            size_estimate=200 * MB,
             import_name="onnxruntime",
             extra_index_url="https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/onnxruntime-cuda-12/pypi/simple/",
         )

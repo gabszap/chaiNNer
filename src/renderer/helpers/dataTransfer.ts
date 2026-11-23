@@ -4,6 +4,9 @@ import { EdgeData, NodeData, SchemaId } from '../../common/common-types';
 import { log } from '../../common/log';
 import { SchemaMap } from '../../common/SchemaMap';
 import { createUniqueId, deriveUniqueId } from '../../common/util';
+import { parseSaveFile } from '../../web/saveFileWeb';
+import { uploadWebFiles } from '../../web/webFsClient';
+import { emitWebIpcEvent } from '../../web/webIpc';
 import { ipcRenderer } from '../safeIpc';
 import { NodeProto, copyEdges, copyNodes, setSelected } from './reactFlowUtil';
 import { SetState } from './types';
@@ -120,8 +123,28 @@ const chainnerPresetProcessor: DataTransferProcessor = (
 const openChainnerFileProcessor: DataTransferProcessor = (dataTransfer) => {
     if (dataTransfer.files.length === 1) {
         const [file] = dataTransfer.files;
-        const path = getFilePath(file);
-        if (/\.chn/i.test(path)) {
+        const filePath = getFilePath(file);
+        if (/\.chn/i.test(filePath)) {
+            if (window.isWebUI) {
+                file.text()
+                    .then((text) => {
+                        const saveData = parseSaveFile(text);
+                        emitWebIpcEvent('file-open', {
+                            kind: 'Success',
+                            path: file.name,
+                            saveData,
+                        });
+                    })
+                    .catch((error) => {
+                        emitWebIpcEvent('file-open', {
+                            kind: 'Error',
+                            path: file.name,
+                            error: String(error),
+                        });
+                    });
+                return true;
+            }
+
             // found a .chn file
 
             // The main process opens the file and pushes the result back over `file-open`, the
@@ -129,7 +152,7 @@ const openChainnerFileProcessor: DataTransferProcessor = (dataTransfer) => {
             // `open-save-file` here and then re-broadcast the result to this very window with
             // `ipcRenderer.sendTo(1, ...)`, but renderer-to-renderer messaging was removed in
             // Electron 28.
-            ipcRenderer.invoke('open-dropped-save-file', path).catch(log.error);
+            ipcRenderer.invoke('open-dropped-save-file', filePath).catch(log.error);
 
             return true;
         }
@@ -144,16 +167,37 @@ const openFileProcessor: DataTransferProcessor = (
     for (const schema of schemata.schemata) {
         for (const input of schema.inputs) {
             if (input.kind === 'file' && input.primaryInput) {
-                const path = getSingleFileWithExtension(dataTransfer, input.filetypes);
-                if (path) {
+                const filePath = getSingleFileWithExtension(dataTransfer, input.filetypes);
+                if (filePath) {
                     // found a supported file type
+                    const position = getNodePosition(100, 100);
+
+                    if (window.isWebUI) {
+                        const [droppedFile] = dataTransfer.files;
+                        const targetSchemaId = schema.schemaId;
+                        const targetInputId = input.id;
+                        uploadWebFiles([droppedFile], 'inputs')
+                            .then((uploaded) => {
+                                if (uploaded.length > 0) {
+                                    createNode({
+                                        position,
+                                        data: {
+                                            schemaId: targetSchemaId,
+                                            inputData: { [targetInputId]: uploaded[0].path },
+                                        },
+                                    });
+                                }
+                            })
+                            .catch(log.error);
+                        return true;
+                    }
 
                     createNode({
                         // hard-coded offset because it looks nicer
-                        position: getNodePosition(100, 100),
+                        position,
                         data: {
                             schemaId: schema.schemaId,
-                            inputData: { [input.id]: path },
+                            inputData: { [input.id]: filePath },
                         },
                     });
 
