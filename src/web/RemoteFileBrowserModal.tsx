@@ -827,8 +827,10 @@ export const RemoteFileBrowserModal = memo(
                                 borderRadius="md"
                                 display={{ base: 'none', lg: 'flex' }}
                                 flexShrink={0}
+                                minH={0}
+                                overflowY="auto"
                                 p={3}
-                                spacing={3}
+                                spacing={2.5}
                                 w="240px"
                             >
                                 <Text
@@ -850,20 +852,23 @@ export const RemoteFileBrowserModal = memo(
                                 ) : (
                                     <>
                                         {primarySelectedEntry.isImage && (
-                                            <Box
+                                            <Center
                                                 bg="blackAlpha.500"
                                                 borderRadius="md"
-                                                overflow="hidden"
-                                                p={1}
+                                                flexShrink={0}
+                                                p={1.5}
+                                                w="full"
                                             >
                                                 <Image
                                                     alt={primarySelectedEntry.name}
+                                                    h="auto"
                                                     maxH="180px"
-                                                    mx="auto"
+                                                    maxW="100%"
                                                     objectFit="contain"
                                                     src={getWebFileUrl(primarySelectedEntry.path)}
+                                                    w="auto"
                                                 />
-                                            </Box>
+                                            </Center>
                                         )}
                                         <Box>
                                             <Text
