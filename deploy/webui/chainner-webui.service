@@ -1,0 +1,23 @@
+[Unit]
+Description=chaiNNer WebUI Backend (Sanic Host + Worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Ajuste usuário e caminhos conforme sua VPS
+User=root
+WorkingDirectory=/opt/chainner
+Environment=PYTHONUNBUFFERED=1
+Environment=CHAINNER_WEB_ROOT=/data/chainner
+
+# --web-mode desabilita /shutdown, /packages/install, /packages/uninstall e wildcard CORS.
+# Se quiser permitir instalar pacotes pela UI, adicione --allow-package-manage.
+ExecStart=/opt/chainner/.venv/bin/python /opt/chainner/backend/src/run.py 8000 --host 127.0.0.1 --web-mode --web-root /data/chainner
+
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

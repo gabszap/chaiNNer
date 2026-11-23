@@ -67,6 +67,35 @@ class ServerConfig:
     Usage: `--web-root /data/chainner`
     """
 
+    host: str = "127.0.0.1"
+    """
+    Host interface to bind the HTTP server to.
+
+    Usage: `--host 127.0.0.1`
+    """
+
+    web_mode: bool = False
+    """
+    Enable hardened WebUI server mode (disables /shutdown and package install/uninstall
+    unless --allow-package-manage is set, and disables wildcard CORS).
+
+    Usage: `--web-mode`
+    """
+
+    allow_package_manage: bool = False
+    """
+    Allow /packages/install and /packages/uninstall endpoints when running in --web-mode.
+
+    Usage: `--allow-package-manage`
+    """
+
+    cors_origins: tuple[str, ...] = ()
+    """
+    Explicit allowed CORS origins (comma-separated or repeated --cors-origin flags).
+
+    Usage: `--cors-origin https://chainner.example.com`
+    """
+
     @staticmethod
     def parse_argv() -> ServerConfig:
         parser = argparse.ArgumentParser(description="ChaiNNer's server.")
@@ -117,8 +146,37 @@ class ServerConfig:
             type=str,
             help="Root sandbox directory for WebUI file browsing, uploads, and downloads.",
         )
+        parser.add_argument(
+            "--host",
+            type=str,
+            default="127.0.0.1",
+            help="Host interface to bind the server to (default: 127.0.0.1).",
+        )
+        parser.add_argument(
+            "--web-mode",
+            action="store_true",
+            help="Enable hardened WebUI server mode (restricts CORS and admin endpoints).",
+        )
+        parser.add_argument(
+            "--allow-package-manage",
+            action="store_true",
+            help="Allow package install/uninstall endpoints in --web-mode.",
+        )
+        parser.add_argument(
+            "--cors-origin",
+            action="append",
+            default=[],
+            help="Allowed CORS origin (can be repeated or comma-separated).",
+        )
 
         parsed = parser.parse_args()
+
+        cors_origins: list[str] = []
+        for raw_origin in parsed.cors_origin:
+            for item in raw_origin.split(","):
+                cleaned = item.strip().rstrip("/")
+                if cleaned:
+                    cors_origins.append(cleaned)
 
         return ServerConfig(
             port=parsed.port,
@@ -130,4 +188,8 @@ class ServerConfig:
             trace=parsed.trace,
             dev_mode=parsed.dev,
             web_root=parsed.web_root or None,
+            host=parsed.host or "127.0.0.1",
+            web_mode=parsed.web_mode,
+            allow_package_manage=parsed.allow_package_manage,
+            cors_origins=tuple(cors_origins),
         )

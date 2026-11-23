@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -110,7 +111,55 @@ app = Sanic("chaiNNer_host", ctx=AppContext())
 app.config.REQUEST_TIMEOUT = sys.maxsize
 app.config.RESPONSE_TIMEOUT = sys.maxsize
 app.config.REQUEST_MAX_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB for media/models
-CORS(app)
+
+
+def _configure_cors(sanic_app: Sanic) -> None:
+    cfg = AppContext.get(sanic_app).config
+    if cfg.cors_origins:
+        CORS(
+            sanic_app,
+            resources={r"/*": {"origins": list(cfg.cors_origins)}},
+            supports_credentials=True,
+        )
+        logger.info("CORS restricted to origins: %s", ", ".join(cfg.cors_origins))
+    elif cfg.web_mode:
+        # In --web-mode without explicit --cors-origin, expect same-origin reverse proxy (e.g. Caddy).
+        logger.info("Web mode active: wildcard CORS disabled (same-origin proxy expected).")
+    else:
+        CORS(sanic_app)
+
+
+def _load_backend_version_info() -> dict[str, str | None]:
+    repo_root = Path(__file__).resolve().parents[2]
+    version: str | None = None
+    pkg_json = repo_root / "package.json"
+    if pkg_json.is_file():
+        try:
+            parsed = json_parse(pkg_json.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict) and isinstance(parsed.get("version"), str):
+                version = parsed["version"]
+        except Exception:
+            pass
+
+    commit: str | None = None
+    try:
+        out = subprocess.check_output(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(repo_root),
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        ).strip()
+        if out:
+            commit = out
+    except Exception:
+        pass
+
+    return {"version": version, "commit": commit}
+
+
+_BACKEND_VERSION_INFO = _load_backend_version_info()
+_configure_cors(app)
 
 
 class SSEFilter(logging.Filter):
@@ -128,6 +177,20 @@ access_logger.addFilter(SSEFilter())
 async def health(_request: Request):
     """Simple health check endpoint that doesn't require full setup"""
     return json({"status": "ok"})
+
+
+@app.route("/version", methods=["GET"])
+async def version_info(request: Request):
+    """Returns backend version, git commit, and active WebUI security flags."""
+    cfg = AppContext.get(request.app).config
+    return json(
+        {
+            "version": _BACKEND_VERSION_INFO["version"],
+            "commit": _BACKEND_VERSION_INFO["commit"],
+            "webMode": cfg.web_mode,
+            "packageManageAllowed": (not cfg.web_mode) or cfg.allow_package_manage,
+        }
+    )
 
 
 @app.route("/nodes")
@@ -285,9 +348,18 @@ def create_update_progress(ctx: AppContext) -> UpdateProgressFn:
 
 @app.route("/packages/uninstall", methods=["POST"])
 async def uninstall_dependencies_request(request: Request):
+    ctx = AppContext.get(request.app)
+    if ctx.config.web_mode and not ctx.config.allow_package_manage:
+        return json(
+            {
+                "status": "error",
+                "message": "Package uninstallation is disabled in --web-mode. Pass --allow-package-manage to enable it.",
+            },
+            status=403,
+        )
+
     package_ids_to_install: list[str] = request.json["packages"]
 
-    ctx = AppContext.get(request.app)
     worker = await ctx.get_worker()
     packages = await worker.get_packages()
 
@@ -326,9 +398,18 @@ async def uninstall_dependencies_request(request: Request):
 
 @app.route("/packages/install", methods=["POST"])
 async def install_dependencies_request(request: Request):
+    ctx = AppContext.get(request.app)
+    if ctx.config.web_mode and not ctx.config.allow_package_manage:
+        return json(
+            {
+                "status": "error",
+                "message": "Package installation is disabled in --web-mode. Pass --allow-package-manage to enable it.",
+            },
+            status=403,
+        )
+
     package_ids_to_install: list[str] = request.json["packages"]
 
-    ctx = AppContext.get(request.app)
     worker = await ctx.get_worker()
     packages = await worker.get_packages()
 
@@ -546,6 +627,15 @@ async def web_fs_write_text(request: Request):
 
 @app.post("/shutdown")
 async def shutdown(request: Request):
+    ctx = AppContext.get(request.app)
+    if ctx.config.web_mode:
+        return json(
+            error_response(
+                "Shutdown endpoint is disabled in --web-mode.",
+                PermissionError("Shutdown disabled in web mode"),
+            ),
+            status=403,
+        )
     await close_server(request.app)
     return json(success_response())
 
@@ -717,7 +807,7 @@ async def after_server_start(sanic_app: Sanic, loop: asyncio.AbstractEventLoop):
 
 def main():
     config = AppContext.get(app).config
-    app.run(port=config.port, single_process=True)
+    app.run(host=config.host, port=config.port, single_process=True)
 
 
 if __name__ == "__main__":

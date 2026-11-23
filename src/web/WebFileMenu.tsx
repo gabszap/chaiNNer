@@ -11,7 +11,7 @@ import {
     MenuList,
     Tooltip,
 } from '@chakra-ui/react';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import {
     MdCameraAlt,
     MdCloudDone,
@@ -40,10 +40,34 @@ import {
     triggerDownloadChainAs,
 } from './webIpc';
 
+interface BackendVersionPayload {
+    version: string | null;
+    commit: string | null;
+    webMode: boolean;
+    packageManageAllowed: boolean;
+}
+
 export const WebFileMenu = memo(() => {
     const connectionState = useContextSelector(BackendContext, (c) => c.connectionState);
     const isBackendReady = useContextSelector(BackendContext, (c) => c.isBackendReady);
     const backendUrl = useContextSelector(BackendContext, (c) => c.url);
+    const [versionInfo, setVersionInfo] = useState<BackendVersionPayload | null>(null);
+
+    useEffect(() => {
+        if (!window.isWebUI || !isBackendReady) return;
+        let canceled = false;
+        fetch(`${backendUrl}/version`, { credentials: 'same-origin' })
+            .then((resp) => (resp.ok ? (resp.json() as Promise<BackendVersionPayload>) : null))
+            .then((data) => {
+                if (!canceled && data) {
+                    setVersionInfo(data);
+                }
+            })
+            .catch(() => undefined);
+        return () => {
+            canceled = true;
+        };
+    }, [backendUrl, isBackendReady]);
 
     const handleNew = useCallback(() => {
         emitWebIpcEvent('file-new');
@@ -119,11 +143,29 @@ export const WebFileMenu = memo(() => {
         return null;
     }
 
+    const hasVersionMismatch = Boolean(
+        versionInfo?.version && versionInfo.version !== window.appConstants.appVersion
+    );
+
     let statusColor = 'yellow.400';
     let statusLabel = `Conectando ao backend (${backendUrl})…`;
     if (connectionState === 'connected' && isBackendReady) {
-        statusColor = 'green.400';
-        statusLabel = `Backend conectado (${backendUrl})`;
+        if (hasVersionMismatch) {
+            statusColor = 'orange.400';
+            statusLabel = `Versão divergente: WebUI v${
+                window.appConstants.appVersion
+            } vs Backend v${versionInfo?.version ?? '?'} (${backendUrl})`;
+        } else {
+            statusColor = 'green.400';
+            const extras = [
+                versionInfo?.version ? `v${versionInfo.version}` : null,
+                versionInfo?.commit ? versionInfo.commit : null,
+                versionInfo?.webMode ? 'web-mode' : null,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+            statusLabel = `Backend conectado (${backendUrl}${extras ? ` · ${extras}` : ''})`;
+        }
     } else if (connectionState === 'failed') {
         statusColor = 'red.400';
         statusLabel = `Falha na conexão com o backend (${backendUrl})`;

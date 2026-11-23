@@ -1,0 +1,41 @@
+# Adicione este bloco ao seu Caddyfile existente na VPS.
+# Substitua o domínio e o caminho para /caminho/para/chainner/dist-web.
+
+chainner.seudominio.com {
+    encode zstd gzip
+
+    # Recomendado se o domínio for público (gere o hash com: caddy hash-password)
+    # basic_auth {
+    #     pedro $2a$14$...HASH_DO_CADDY...
+    #     amigo $2a$14$...HASH_DO_CADDY...
+    # }
+
+    # API e SSE (same-origin em /api/* -> http://127.0.0.1:8000/*)
+    handle_path /api/* {
+        reverse_proxy 127.0.0.1:8000 {
+            # Garante entrega imediata dos eventos SSE (/sse e /setup-sse)
+            flush_interval -1
+
+            transport http {
+                # Permite execuções longas de upscaling em POST /run e uploads grandes
+                read_timeout 0
+                write_timeout 0
+            }
+        }
+    }
+
+    # Bundle estático da WebUI gerado por `npm run web:build`
+    handle {
+        root * /opt/chainner/dist-web
+
+        # Cache longo nos assets com hash do Vite
+        @assets path /assets/*
+        header @assets Cache-Control "public, max-age=31536000, immutable"
+
+        # Evita cache antigo no HTML principal após updates
+        @html path / /index.html
+        header @html Cache-Control "no-cache"
+
+        file_server
+    }
+}
