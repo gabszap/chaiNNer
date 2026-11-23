@@ -89,13 +89,13 @@ export const WebFileMenu = memo(() => {
         <>
             <Menu isLazy>
                 <MenuButton
-                    aria-label="Menu de arquivo"
+                    aria-label="Menu da chain"
                     as={Button}
                     leftIcon={<MdMenu />}
                     size="sm"
                     variant="outline"
                 >
-                    Arquivo
+                    Menu
                 </MenuButton>
                 <MenuList zIndex={2000}>
                     <MenuItem

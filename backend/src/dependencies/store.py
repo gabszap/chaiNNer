@@ -18,6 +18,9 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 installed_packages: dict[str, str] = {}
 
 COLLECTING_REGEX = re.compile(r"Collecting ([a-zA-Z0-9-_]+)")
+DOWNLOADING_REGEX = re.compile(
+    r"Downloading\s+(?:https?://\S+/)?([a-zA-Z0-9_.-]+?)(?:-\d|\s|$)"
+)
 UNINSTALLING_REGEX = re.compile(r"Uninstalling ([a-zA-Z0-9-_]+)-+")
 
 DEP_MAX_PROGRESS = 0.8
@@ -315,10 +318,15 @@ async def install_dependencies(
                 await update_progress_cb(
                     f"Collecting {installing_name}...", get_progress_amount(), None
                 )
-        # The Downloading step of pip. It tells us what package is currently being downloaded.
-        # Later, we can use this to get the progress of the download.
-        # For now, we just tell the user that it's happening.
+        # The Downloading step of pip. Extract the real package name from the wheel/tarball
+        # filename so progress doesn't stay stuck showing the last collected transitive package.
         elif "Downloading" in line:
+            dl_match = DOWNLOADING_REGEX.search(line)
+            if dl_match:
+                raw_dl = dl_match.group(1).replace("_", "-")
+                installing_name = dependency_name_map.get(
+                    raw_dl, dependency_name_map.get(raw_dl.lower(), raw_dl)
+                )
             await update_progress_cb(
                 f"Downloading {installing_name}...",
                 get_progress_amount() + dep_small_incr,
