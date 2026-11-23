@@ -1,4 +1,37 @@
-# chaiNNer
+# chaiNNer (WebUI Fork)
+
+> **Fork:** [`gabszap/chaiNNer`](https://github.com/gabszap/chaiNNer) — adiciona suporte completo para rodar o editor do chaiNNer **direto no navegador (sem Electron)** conectado a um backend Python local ou em uma VPS (atrás de reverse proxy como Caddy/Nginx).
+
+### O que foi adicionado neste fork
+
+- **Build Web standalone (Vite):** `npm run web:dev`, `npm run web:build` (`dist-web/`) e `npm run web:preview`, com proxy same-origin `/api/* -> http://127.0.0.1:8000/*`, divisão de chunks (`manualChunks`) e exclusão de `.venv/`/`backend/` do watcher do Vite.
+- **Web Bootstrap & IPC Shims (`src/web/`):** camada leve na borda de `window.unsafeIpcRenderer`, `window.appConstants`, `window.electronFileUtils` e `electron-log/renderer`, mantendo o app Electron intacto e facilitando updates do upstream.
+- **Navegador de arquivos nativo + Sandbox no servidor (`backend/src/web_fs.py` + `RemoteFileBrowserModal.tsx`):**
+  - Substitui os diálogos nativos do OS por um modal integrado ao tema do chaiNNer com pastas `inputs/`, `outputs/`, `models/` e `chains/` protegidas por `Path.resolve().is_relative_to(web_root)`.
+  - Upload múltiplo, drag-and-drop direto no modal, no `FileInput` e no canvas, preview de imagens, download, criação de pasta, renomear e excluir com confirmação.
+- **Chains `.chn` no servidor e no navegador (`src/web/saveFileWeb.ts`):** abrir/salvar `.chn` diretamente em `chains/` na VPS (com `Ctrl+S` salvando direto no servidor) ou abrir/baixar localmente no PC, compatível com migrações e checksum MD5 do desktop.
+- **Clipboard & Export no navegador:** copiar/colar nós (`Ctrl+C`/`Ctrl+V`), colar imagens do clipboard criando automaticamente `Load Image` (`inputs/clipboard/`) e exportar/copiar screenshot da chain (`Ctrl+P` / `Ctrl+Shift+P`).
+- **SSE multi-aba e estável (`backend/src/events.py`):** `EventQueue.subscribe()` com pub/sub fan-out para múltiplas abas/usuários simultâneos, keepalive periódico, `X-Accel-Buffering: no` e remoção do timeout de 1h no proxy interno.
+- **Hardening & Deploy na VPS (`--web-mode` + `deploy/webui/`):** bloqueio de `/shutdown` e `/packages/install|uninstall` por padrão em `--web-mode`, CORS configurável (`--cors-origin`), `GET /version`, indicador de status/versão no Header e templates prontos de [Caddyfile](./deploy/webui/Caddyfile.example), [systemd](./deploy/webui/chainner-webui.service) e [guia de deploy](./deploy/webui/README.md).
+- **Ajustes de dependências:** wheel explícito `+cpu` para PyTorch sem GPU Nvidia, estimativas de tamanho calibradas e nome real do pacote exibido durante downloads no `store.py`.
+
+#### Como rodar a WebUI localmente
+
+```bash
+# Terminal 1 — Backend Python 3.11
+python3.11 -m venv .venv
+.venv/bin/python backend/src/run.py 8000 --dev   # Windows: .\.venv\Scripts\python.exe backend\src\run.py 8000 --dev
+
+# Terminal 2 — WebUI (http://127.0.0.1:5173)
+npm ci --allow-git=all
+npm run web:dev
+```
+
+Para deploy em produção na VPS com Caddy + systemd, veja **[deploy/webui/README.md](./deploy/webui/README.md)**.
+
+---
+
+## Sobre o chaiNNer (Upstream)
 
 [![GitHub Latest Release](https://img.shields.io/github/v/release/chaiNNer-org/chaiNNer)](https://github.com/chaiNNer-org/chaiNNer/releases/latest)
 [![GitHub Total Downloads](https://img.shields.io/github/downloads/chaiNNer-org/chaiNNer/total)](https://github.com/chaiNNer-org/chaiNNer/releases)

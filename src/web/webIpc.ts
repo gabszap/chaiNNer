@@ -279,13 +279,12 @@ const handleInvoke = async (
         }
         case 'file-save-json': {
             const saveData = args[0] as SaveData;
-            const savePath = String(args[1] ?? 'chain.chn');
-            if (isServerFilePath(savePath)) {
-                const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
-                await writeWebTextFile(savePath, serialized);
-                return undefined;
-            }
-            downloadChainFile(saveData, savePath);
+            const savePath = String(args[1] ?? 'chain.chn').trim() || 'chain.chn';
+            const serverTarget = isServerFilePath(savePath)
+                ? savePath
+                : `chains/${savePath.endsWith('.chn') ? savePath : `${savePath}.chn`}`;
+            const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
+            await writeWebTextFile(serverTarget, serialized);
             return undefined;
         }
         case 'file-save-as-json': {
@@ -313,7 +312,8 @@ const handleInvoke = async (
 
             if (asDownload) {
                 downloadChainFile(saveData, finalName);
-                return { kind: 'Success', path: finalName } satisfies FileSaveResult;
+                // Keep current server savePath intact when exporting a local download copy
+                return { kind: 'Canceled' } satisfies FileSaveResult;
             }
 
             const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
