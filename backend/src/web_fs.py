@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import TypedDict
 
@@ -289,4 +290,123 @@ def create_directory(
         "modifiedMs": int(stat.st_mtime * 1000),
         "ext": "",
         "isImage": False,
+    }
+
+
+def _is_protected_sandbox_dir(resolved_root: Path, target: Path) -> bool:
+    if target == resolved_root:
+        return True
+    return any(target == (resolved_root / sub).resolve() for sub in DEFAULT_SUBDIRS)
+
+
+def delete_entry(root: Path, raw_path: str) -> dict[str, str]:
+    resolved_root = ensure_sandbox_dirs(root)
+    target = resolve_sandbox_path(resolved_root, raw_path)
+    if _is_protected_sandbox_dir(resolved_root, target):
+        raise PermissionError("Cannot delete the sandbox root or default folders.")
+    if not target.exists():
+        raise FileNotFoundError("File or directory not found.")
+
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+
+    return {"deleted": str(target)}
+
+
+def rename_entry(root: Path, raw_path: str, new_name: str) -> FileEntry:
+    resolved_root = ensure_sandbox_dirs(root)
+    target = resolve_sandbox_path(resolved_root, raw_path)
+    if _is_protected_sandbox_dir(resolved_root, target):
+        raise PermissionError("Cannot rename the sandbox root or default folders.")
+    if not target.exists():
+        raise FileNotFoundError("File or directory not found.")
+
+    if (
+        not new_name
+        or not new_name.strip()
+        or "/" in new_name
+        or "\\" in new_name
+        or new_name.strip() in {".", ".."}
+    ):
+        raise ValueError("Invalid target name.")
+
+    cleaned = sanitize_filename(new_name)
+    dest = (target.parent / cleaned).resolve()
+    if not dest.is_relative_to(resolved_root):
+        raise PermissionError("Target path escapes the allowed web root.")
+    if dest.exists() and dest != target:
+        raise FileExistsError(f"'{cleaned}' already exists in this folder.")
+
+    target.rename(dest)
+    stat = dest.stat()
+    is_dir = dest.is_dir()
+    ext = "" if is_dir else dest.suffix.lower()
+
+    return {
+        "name": dest.name,
+        "path": str(dest),
+        "relativePath": _to_relative_posix(resolved_root, dest),
+        "isDir": is_dir,
+        "size": 0 if is_dir else stat.st_size,
+        "modifiedMs": int(stat.st_mtime * 1000),
+        "ext": ext,
+        "isImage": (not is_dir) and (ext in IMAGE_EXTENSIONS),
+    }
+
+
+def read_text_file(
+    root: Path,
+    raw_path: str,
+    max_bytes: int = 25 * 1024 * 1024,
+) -> dict[str, str]:
+    resolved_root = ensure_sandbox_dirs(root)
+    target = resolve_sandbox_path(resolved_root, raw_path)
+    if not target.exists() or not target.is_file():
+        raise FileNotFoundError("File not found.")
+    if target.stat().st_size > max_bytes:
+        raise ValueError("File exceeds maximum allowed text read size.")
+
+    content = target.read_text(encoding="utf-8")
+    return {
+        "name": target.name,
+        "path": str(target),
+        "relativePath": _to_relative_posix(resolved_root, target),
+        "content": content,
+    }
+
+
+def write_text_file(root: Path, target_path: str, content: str) -> FileEntry:
+    resolved_root = ensure_sandbox_dirs(root)
+    if not target_path or not target_path.strip():
+        raise ValueError("Target path is required.")
+
+    raw = Path(target_path.strip())
+    if raw.is_absolute():
+        parent = resolve_sandbox_path(resolved_root, str(raw.parent))
+        safe_name = sanitize_filename(raw.name)
+    else:
+        rel_parent = str(raw.parent) if str(raw.parent) not in {"", "."} else "chains"
+        parent = resolve_sandbox_path(resolved_root, rel_parent)
+        safe_name = sanitize_filename(raw.name)
+
+    parent.mkdir(parents=True, exist_ok=True)
+    dest = (parent / safe_name).resolve()
+    if not dest.is_relative_to(resolved_root):
+        raise PermissionError("Target path escapes the allowed web root.")
+
+    dest.write_text(content, encoding="utf-8")
+    stat = dest.stat()
+    ext = dest.suffix.lower()
+
+    return {
+        "name": dest.name,
+        "path": str(dest),
+        "relativePath": _to_relative_posix(resolved_root, dest),
+        "isDir": False,
+        "size": stat.st_size,
+        "modifiedMs": int(stat.st_mtime * 1000),
+        "ext": ext,
+        "isImage": ext in IMAGE_EXTENSIONS,
     }

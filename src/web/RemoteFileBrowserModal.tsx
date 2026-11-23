@@ -31,7 +31,9 @@ import {
     MdChevronRight,
     MdCloudUpload,
     MdCreateNewFolder,
+    MdDelete,
     MdDownload,
+    MdDriveFileRenameOutline,
     MdFolder,
     MdHome,
     MdImage,
@@ -46,10 +48,14 @@ import {
     WebDirectoryListing,
     WebFileEntry,
     createWebDirectory,
+    deleteWebEntry,
     getWebFileUrl,
     listWebDirectory,
+    renameWebEntry,
     uploadWebFiles,
 } from './webFsClient';
+
+const PROTECTED_TOP_DIRS = new Set(['inputs', 'outputs', 'models', 'chains']);
 
 interface RemoteFileBrowserModalProps {
     isOpen: boolean;
@@ -103,6 +109,10 @@ export const RemoteFileBrowserModal = memo(
         const [isDragActive, setIsDragActive] = useState(false);
         const [creatingFolder, setCreatingFolder] = useState(false);
         const [newFolderName, setNewFolderName] = useState('');
+        const [renaming, setRenaming] = useState(false);
+        const [renameValue, setRenameValue] = useState('');
+        const [confirmingDelete, setConfirmingDelete] = useState(false);
+        const [mutating, setMutating] = useState(false);
 
         const fileUploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -163,6 +173,55 @@ export const RemoteFileBrowserModal = memo(
             const last = selectedPaths[selectedPaths.length - 1];
             return listing.entries.find((e) => e.path === last) ?? null;
         }, [listing, selectedPaths]);
+
+        const isSelectedProtected = useMemo(() => {
+            if (!primarySelectedEntry) return true;
+            return (
+                primarySelectedEntry.isDir &&
+                PROTECTED_TOP_DIRS.has(primarySelectedEntry.relativePath)
+            );
+        }, [primarySelectedEntry]);
+
+        useEffect(() => {
+            setRenaming(false);
+            setConfirmingDelete(false);
+            setRenameValue(primarySelectedEntry?.name ?? '');
+        }, [primarySelectedEntry?.path, primarySelectedEntry?.name]);
+
+        const handleRenameSelected = useCallback(async () => {
+            if (!primarySelectedEntry || !listing) return;
+            const trimmed = renameValue.trim();
+            if (!trimmed || trimmed === primarySelectedEntry.name) {
+                setRenaming(false);
+                return;
+            }
+            setMutating(true);
+            setError(null);
+            try {
+                const updated = await renameWebEntry(primarySelectedEntry.path, trimmed);
+                setRenaming(false);
+                await fetchDirectory(listing.currentPath, updated.path);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+            } finally {
+                setMutating(false);
+            }
+        }, [fetchDirectory, listing, primarySelectedEntry, renameValue]);
+
+        const handleDeleteSelected = useCallback(async () => {
+            if (!primarySelectedEntry || !listing) return;
+            setMutating(true);
+            setError(null);
+            try {
+                await deleteWebEntry(primarySelectedEntry.path);
+                setConfirmingDelete(false);
+                await fetchDirectory(listing.currentPath);
+            } catch (err) {
+                setError(err instanceof Error ? err.message : String(err));
+            } finally {
+                setMutating(false);
+            }
+        }, [fetchDirectory, listing, primarySelectedEntry]);
 
         const handleCancel = useCallback(() => {
             onClose({ canceled: true, filePaths: [] });
@@ -811,6 +870,118 @@ export const RemoteFileBrowserModal = memo(
                                                     </Tooltip>
                                                 )}
                                             </HStack>
+                                        )}
+                                        {!isSelectedProtected && !renaming && !confirmingDelete && (
+                                            <HStack spacing={2}>
+                                                <Button
+                                                    flex={1}
+                                                    leftIcon={<MdDriveFileRenameOutline />}
+                                                    size="xs"
+                                                    variant="outline"
+                                                    onClick={() => {
+                                                        setRenameValue(primarySelectedEntry.name);
+                                                        setRenaming(true);
+                                                    }}
+                                                >
+                                                    Renomear
+                                                </Button>
+                                                <Button
+                                                    colorScheme="red"
+                                                    flex={1}
+                                                    leftIcon={<MdDelete />}
+                                                    size="xs"
+                                                    variant="outline"
+                                                    onClick={() => setConfirmingDelete(true)}
+                                                >
+                                                    Excluir
+                                                </Button>
+                                            </HStack>
+                                        )}
+                                        {renaming && (
+                                            <VStack
+                                                align="stretch"
+                                                spacing={2}
+                                            >
+                                                <Input
+                                                    autoFocus
+                                                    bg="var(--bg-800)"
+                                                    size="xs"
+                                                    value={renameValue}
+                                                    onChange={(e) => setRenameValue(e.target.value)}
+                                                    onKeyDown={(e) => {
+                                                        if (e.key === 'Enter') {
+                                                            handleRenameSelected().catch(
+                                                                () => undefined
+                                                            );
+                                                        } else if (e.key === 'Escape') {
+                                                            setRenaming(false);
+                                                        }
+                                                    }}
+                                                />
+                                                <HStack spacing={2}>
+                                                    <Button
+                                                        colorScheme="blue"
+                                                        flex={1}
+                                                        isLoading={mutating}
+                                                        size="xs"
+                                                        onClick={() => {
+                                                            handleRenameSelected().catch(
+                                                                () => undefined
+                                                            );
+                                                        }}
+                                                    >
+                                                        Salvar
+                                                    </Button>
+                                                    <Button
+                                                        flex={1}
+                                                        size="xs"
+                                                        variant="ghost"
+                                                        onClick={() => setRenaming(false)}
+                                                    >
+                                                        Cancelar
+                                                    </Button>
+                                                </HStack>
+                                            </VStack>
+                                        )}
+                                        {confirmingDelete && (
+                                            <VStack
+                                                align="stretch"
+                                                bg="red.900"
+                                                borderRadius="md"
+                                                p={2}
+                                                spacing={2}
+                                            >
+                                                <Text
+                                                    color="red.100"
+                                                    fontSize="xs"
+                                                >
+                                                    Excluir permanentemente{' '}
+                                                    <strong>{primarySelectedEntry.name}</strong>?
+                                                </Text>
+                                                <HStack spacing={2}>
+                                                    <Button
+                                                        colorScheme="red"
+                                                        flex={1}
+                                                        isLoading={mutating}
+                                                        size="xs"
+                                                        onClick={() => {
+                                                            handleDeleteSelected().catch(
+                                                                () => undefined
+                                                            );
+                                                        }}
+                                                    >
+                                                        Confirmar
+                                                    </Button>
+                                                    <Button
+                                                        flex={1}
+                                                        size="xs"
+                                                        variant="ghost"
+                                                        onClick={() => setConfirmingDelete(false)}
+                                                    >
+                                                        Cancelar
+                                                    </Button>
+                                                </HStack>
+                                            </VStack>
                                         )}
                                     </>
                                 )}

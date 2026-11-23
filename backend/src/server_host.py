@@ -39,11 +39,15 @@ from server_config import ServerConfig
 from server_process_helper import WorkerServer
 from web_fs import (
     create_directory,
+    delete_entry,
     ensure_sandbox_dirs,
     get_default_web_root,
     list_directory,
+    read_text_file,
+    rename_entry,
     resolve_sandbox_path,
     save_uploaded_file,
+    write_text_file,
 )
 
 
@@ -466,6 +470,73 @@ async def web_fs_mkdir(request: Request):
     name = payload.get("name", "")
     try:
         entry = create_directory(ctx.web_root, parent_path, name)
+        return json(entry)
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+    except Exception as ex:
+        return json({"error": str(ex)}, status=400)
+
+
+@app.post("/web/fs/delete")
+async def web_fs_delete(request: Request):
+    ctx = AppContext.get(request.app)
+    payload = request.json or {}
+    raw_path = payload.get("path", "")
+    try:
+        result = delete_entry(ctx.web_root, raw_path)
+        return json(result)
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+    except FileNotFoundError as ex:
+        return json({"error": str(ex)}, status=404)
+    except Exception as ex:
+        return json({"error": str(ex)}, status=400)
+
+
+@app.post("/web/fs/rename")
+async def web_fs_rename(request: Request):
+    ctx = AppContext.get(request.app)
+    payload = request.json or {}
+    raw_path = payload.get("path", "")
+    new_name = payload.get("newName", "")
+    try:
+        entry = rename_entry(ctx.web_root, raw_path, new_name)
+        return json(entry)
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+    except FileNotFoundError as ex:
+        return json({"error": str(ex)}, status=404)
+    except FileExistsError as ex:
+        return json({"error": str(ex)}, status=409)
+    except Exception as ex:
+        return json({"error": str(ex)}, status=400)
+
+
+@app.get("/web/fs/read-text")
+async def web_fs_read_text(request: Request):
+    ctx = AppContext.get(request.app)
+    raw_path = request.args.get("path", "")
+    try:
+        data = read_text_file(ctx.web_root, raw_path)
+        return json(data)
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+    except FileNotFoundError as ex:
+        return json({"error": str(ex)}, status=404)
+    except Exception as ex:
+        return json({"error": str(ex)}, status=400)
+
+
+@app.post("/web/fs/write-text")
+async def web_fs_write_text(request: Request):
+    ctx = AppContext.get(request.app)
+    payload = request.json or {}
+    target_path = payload.get("path", "")
+    content = payload.get("content", "")
+    if not isinstance(content, str):
+        return json({"error": "Field 'content' must be a string."}, status=400)
+    try:
+        entry = write_text_file(ctx.web_root, target_path, content)
         return json(entry)
     except PermissionError as ex:
         return json({"error": str(ex)}, status=403)

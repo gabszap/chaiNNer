@@ -1,12 +1,13 @@
 import path from 'path';
-import { FileSaveResult, PythonInfo, Version } from '../common/common-types';
+import { FileOpenResult, FileSaveResult, PythonInfo, Version } from '../common/common-types';
 import { log } from '../common/log';
 import { ChannelArgs, InvokeChannels, SendChannels } from '../common/safeIpc';
 import { ChainnerSettings, defaultSettings } from '../common/settings/settings';
 import { parseSaveFile, stringifySaveFile } from './saveFileWeb';
 import { getWebBackendUrl, setWebBackendUrl } from './webConfig';
 import { openRemoteFileDialog, openWebPromptDialog } from './webDialogs';
-import type { SaveData } from '../main/SaveFile';
+import { readWebTextFile, uploadWebFiles, writeWebTextFile } from './webFsClient';
+import type { ParsedSaveData, SaveData } from '../main/SaveFile';
 import type { FileFilter } from 'electron/common';
 
 export { getWebBackendUrl, setWebBackendUrl };
@@ -18,6 +19,8 @@ type ListenerFn = (event: unknown, ...args: unknown[]) => void;
 
 const listeners = new Map<string, Set<ListenerFn>>();
 const memoryClipboardBuffers = new Map<string, string>();
+let pendingClipboardImage: { blob: Blob; mime: string } | null = null;
+let forceNextSaveDownload = false;
 
 export const emitWebIpcEvent = <C extends keyof SendChannels>(
     channel: C,
@@ -30,6 +33,9 @@ export const emitWebIpcEvent = <C extends keyof SendChannels>(
         listener(fakeEvent, ...args);
     });
 };
+
+const isServerFilePath = (filePath: string): boolean =>
+    filePath.includes('/') || filePath.includes('\\');
 
 const loadSettings = (): ChainnerSettings => {
     try {
@@ -71,6 +77,11 @@ const downloadChainFile = (saveData: SaveData, filename: string): void => {
     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 };
 
+export const triggerDownloadChainAs = (): void => {
+    forceNextSaveDownload = true;
+    emitWebIpcEvent('file-save-as');
+};
+
 export const openLocalChainFile = (): void => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -95,6 +106,34 @@ export const openLocalChainFile = (): void => {
         }
     };
     input.click();
+};
+
+export const openServerChainFile = async (): Promise<void> => {
+    const result = await openRemoteFileDialog({
+        mode: 'file',
+        title: 'Abrir chain (.chn) do servidor',
+        initialPath: 'chains',
+        extensions: ['chn', 'json'],
+        allowMultiple: false,
+    });
+    if (result.canceled || result.filePaths.length === 0) return;
+
+    const selectedPath = result.filePaths[0];
+    try {
+        const file = await readWebTextFile(selectedPath);
+        const saveData = parseSaveFile(file.content);
+        emitWebIpcEvent('file-open', {
+            kind: 'Success',
+            path: file.path,
+            saveData,
+        });
+    } catch (error) {
+        emitWebIpcEvent('file-open', {
+            kind: 'Error',
+            path: selectedPath,
+            error: String(error),
+        });
+    }
 };
 
 const fetchPythonInfo = async (): Promise<PythonInfo> => {
@@ -133,6 +172,67 @@ const extractExtensions = (filters: FileFilter[] | undefined): string[] => {
     return [...exts];
 };
 
+const detectClipboardImage = async (): Promise<string[]> => {
+    pendingClipboardImage = null;
+    if (typeof navigator.clipboard.read !== 'function') {
+        return [];
+    }
+    try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+            const imageMime = item.types.find((type) => type.startsWith('image/'));
+            if (imageMime) {
+                // eslint-disable-next-line no-await-in-loop
+                const blob = await item.getType(imageMime);
+                pendingClipboardImage = { blob, mime: imageMime };
+                return [imageMime];
+            }
+        }
+    } catch {
+        // Permission denied or unavailable; fall back to internal chain clipboard
+    }
+    return [];
+};
+
+const storeClipboardImageOnServer = async (): Promise<string> => {
+    let image = pendingClipboardImage;
+    pendingClipboardImage = null;
+
+    if (!image && typeof navigator.clipboard.read === 'function') {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+            const imageMime = item.types.find((type) => type.startsWith('image/'));
+            if (imageMime) {
+                // eslint-disable-next-line no-await-in-loop
+                const blob = await item.getType(imageMime);
+                image = { blob, mime: imageMime };
+                break;
+            }
+        }
+    }
+
+    if (!image) {
+        throw new Error('Nenhuma imagem encontrada na área de transferência.');
+    }
+
+    const ext = image.mime.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+    const file = new File([image.blob], `paste-${Date.now()}.${ext}`, { type: image.mime });
+    const uploaded = await uploadWebFiles([file], 'inputs/clipboard');
+    if (uploaded.length === 0) {
+        throw new Error('Falha ao enviar imagem colada para o servidor.');
+    }
+    return uploaded[0].path;
+};
+
+const writeImageDataUrlToClipboard = async (dataUrl: string): Promise<void> => {
+    if (typeof ClipboardItem === 'undefined' || typeof navigator.clipboard.write !== 'function') {
+        return;
+    }
+    const resp = await fetch(dataUrl);
+    const blob = await resp.blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type || 'image/png']: blob })]);
+};
+
 const handleInvoke = async (
     channel: keyof InvokeChannels,
     ...args: unknown[]
@@ -159,9 +259,32 @@ const handleInvoke = async (
             }
             return undefined;
         }
+        case 'open-save-file': {
+            const targetPath = String(args[0] ?? '');
+            try {
+                const file = await readWebTextFile(targetPath);
+                const saveData = parseSaveFile(file.content);
+                return {
+                    kind: 'Success',
+                    path: file.path,
+                    saveData,
+                } satisfies FileOpenResult<ParsedSaveData>;
+            } catch (error) {
+                return {
+                    kind: 'Error',
+                    path: targetPath,
+                    error: String(error),
+                } satisfies FileOpenResult<ParsedSaveData>;
+            }
+        }
         case 'file-save-json': {
             const saveData = args[0] as SaveData;
             const savePath = String(args[1] ?? 'chain.chn');
+            if (isServerFilePath(savePath)) {
+                const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
+                await writeWebTextFile(savePath, serialized);
+                return undefined;
+            }
             downloadChainFile(saveData, savePath);
             return undefined;
         }
@@ -169,12 +292,17 @@ const handleInvoke = async (
             const saveData = args[0] as SaveData;
             const defaultPath = typeof args[1] === 'string' && args[1] ? args[1] : 'chain.chn';
             const suggested = defaultPath.split(/[\\/]/).pop() || 'chain.chn';
+            const asDownload = forceNextSaveDownload;
+            forceNextSaveDownload = false;
+
             const chosen = await openWebPromptDialog({
-                title: 'Salvar chain (.chn)',
-                description: 'Escolha o nome do arquivo para download:',
+                title: asDownload ? 'Baixar chain (.chn)' : 'Salvar chain no servidor (chains/)',
+                description: asDownload
+                    ? 'Escolha o nome do arquivo para baixar no seu computador:'
+                    : 'Escolha o nome do arquivo .chn para salvar na pasta chains/ do servidor:',
                 placeholder: 'minha-chain.chn',
                 defaultValue: suggested,
-                confirmLabel: 'Baixar .chn',
+                confirmLabel: asDownload ? 'Baixar .chn' : 'Salvar no servidor',
             });
             if (!chosen || !chosen.trim()) {
                 return { kind: 'Canceled' } satisfies FileSaveResult;
@@ -182,8 +310,15 @@ const handleInvoke = async (
             const finalName = chosen.trim().endsWith('.chn')
                 ? chosen.trim()
                 : `${chosen.trim()}.chn`;
-            downloadChainFile(saveData, finalName);
-            return { kind: 'Success', path: finalName } satisfies FileSaveResult;
+
+            if (asDownload) {
+                downloadChainFile(saveData, finalName);
+                return { kind: 'Success', path: finalName } satisfies FileSaveResult;
+            }
+
+            const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
+            const saved = await writeWebTextFile(`chains/${finalName}`, serialized);
+            return { kind: 'Success', path: saved.path } satisfies FileSaveResult;
         }
         case 'file-select': {
             const filters = args[0] as FileFilter[] | undefined;
@@ -220,12 +355,15 @@ const handleInvoke = async (
         case 'clipboard-writeBuffer-fromString': {
             const format = String(args[0] ?? '');
             const json = String(args[1] ?? '');
+            pendingClipboardImage = null;
             memoryClipboardBuffers.set(format, json);
             try {
                 sessionStorage.setItem(`${CLIPBOARD_BUFFER_PREFIX}${format}`, json);
             } catch {
                 // Ignore quota errors in sessionStorage
             }
+            // Clear any image in the OS clipboard so Ctrl+V prioritizes the copied nodes
+            navigator.clipboard.writeText('chainner-chain').catch(() => undefined);
             return undefined;
         }
         case 'clipboard-readBuffer-toString': {
@@ -235,8 +373,16 @@ const handleInvoke = async (
             return sessionStorage.getItem(`${CLIPBOARD_BUFFER_PREFIX}${format}`) ?? '';
         }
         case 'clipboard-availableFormats':
-            // Empty array signals copyAndPaste.ts to read 'application/chainner.chain'
-            return [];
+            return detectClipboardImage();
+        case 'clipboard-readImage-and-store':
+            return storeClipboardImageOnServer();
+        case 'clipboard-writeImageFromURL': {
+            const dataUrl = String(args[0] ?? '');
+            if (dataUrl) {
+                await writeImageDataUrlToClipboard(dataUrl);
+            }
+            return undefined;
+        }
         case 'clipboard-writeText': {
             const text = String(args[0] ?? '');
             await navigator.clipboard.writeText(text);
@@ -267,7 +413,6 @@ const handleInvoke = async (
         case 'quit-application':
         case 'app-quit':
         case 'open-dropped-save-file':
-        case 'clipboard-writeImageFromURL':
             return undefined;
         default:
             log.debug(`[WebIPC] Unhandled invoke channel: ${String(channel)}`);

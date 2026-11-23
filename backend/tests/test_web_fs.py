@@ -8,11 +8,15 @@ import pytest
 
 from web_fs import (
     create_directory,
+    delete_entry,
     ensure_sandbox_dirs,
     list_directory,
+    read_text_file,
+    rename_entry,
     resolve_sandbox_path,
     sanitize_filename,
     save_uploaded_file,
+    write_text_file,
 )
 
 
@@ -64,3 +68,35 @@ def test_create_directory_and_sanitize(tmp_path: Path):
 
     with pytest.raises(ValueError):
         create_directory(root, "outputs", "../escape")
+
+
+def test_rename_and_delete_entry_protects_defaults(tmp_path: Path):
+    root = ensure_sandbox_dirs(tmp_path / "sandbox")
+    saved = save_uploaded_file(root, "inputs", "old.png", b"IMG")
+
+    renamed = rename_entry(root, saved["path"], "new.png")
+    assert renamed["name"] == "new.png"
+    assert Path(renamed["path"]).is_file()
+    assert not Path(saved["path"]).exists()
+
+    delete_entry(root, renamed["path"])
+    assert not Path(renamed["path"]).exists()
+
+    with pytest.raises(PermissionError):
+        delete_entry(root, str(root / "inputs"))
+
+    with pytest.raises(PermissionError):
+        rename_entry(root, str(root / "outputs"), "renamed_outputs")
+
+
+def test_write_and_read_text_chain_file(tmp_path: Path):
+    root = ensure_sandbox_dirs(tmp_path / "sandbox")
+    written = write_text_file(root, "chains/upscale.chn", '{"version":"0.26.1"}')
+    assert written["name"] == "upscale.chn"
+    assert written["relativePath"] == "chains/upscale.chn"
+
+    loaded = read_text_file(root, written["path"])
+    assert loaded["content"] == '{"version":"0.26.1"}'
+
+    with pytest.raises(PermissionError):
+        write_text_file(root, "../escape.chn", "{}")
