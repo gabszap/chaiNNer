@@ -43,7 +43,7 @@ import {
     MdRefresh,
     MdSearch,
 } from 'react-icons/md';
-import { RemoteFileDialogOptions, RemoteFileDialogResult } from './webDialogs';
+import { RemoteFileDialogOptions, RemoteFileDialogResult, showWebToast } from './webDialogs';
 import {
     WebDirectoryListing,
     WebFileEntry,
@@ -64,7 +64,7 @@ interface RemoteFileBrowserModalProps {
 }
 
 const formatFileSize = (bytes: number): string => {
-    if (bytes <= 0) return '—';
+    if (bytes <= 0) return '0 B';
     const units = ['B', 'KB', 'MB', 'GB'];
     let val = bytes;
     let idx = 0;
@@ -73,6 +73,11 @@ const formatFileSize = (bytes: number): string => {
         idx += 1;
     }
     return `${val.toFixed(idx >= 2 ? 1 : 0)} ${units[idx]}`;
+};
+
+const formatFileCount = (count: number): string => {
+    if (count === 0) return 'vazia';
+    return count === 1 ? '1 arq.' : `${count} arqs.`;
 };
 
 const formatDate = (ms: number): string => {
@@ -200,6 +205,11 @@ export const RemoteFileBrowserModal = memo(
             try {
                 const updated = await renameWebEntry(primarySelectedEntry.path, trimmed);
                 setRenaming(false);
+                showWebToast({
+                    title: 'Renomeado',
+                    description: `${primarySelectedEntry.name} → ${updated.name}`,
+                    status: 'success',
+                });
                 await fetchDirectory(listing.currentPath, updated.path);
             } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
@@ -215,6 +225,11 @@ export const RemoteFileBrowserModal = memo(
             try {
                 await deleteWebEntry(primarySelectedEntry.path);
                 setConfirmingDelete(false);
+                showWebToast({
+                    title: 'Excluído',
+                    description: `${primarySelectedEntry.name} foi removido do servidor.`,
+                    status: 'info',
+                });
                 await fetchDirectory(listing.currentPath);
             } catch (err) {
                 setError(err instanceof Error ? err.message : String(err));
@@ -287,6 +302,14 @@ export const RemoteFileBrowserModal = memo(
                 try {
                     const uploaded = await uploadWebFiles(list, destDir);
                     const firstUploaded = uploaded[0]?.path;
+                    showWebToast({
+                        title: 'Upload concluído',
+                        description:
+                            uploaded.length === 1
+                                ? `${uploaded[0].name} enviado para o servidor.`
+                                : `${uploaded.length} arquivos enviados para o servidor.`,
+                        status: 'success',
+                    });
                     await fetchDirectory(destDir, firstUploaded);
                 } catch (err) {
                     setError(err instanceof Error ? err.message : String(err));
@@ -604,7 +627,7 @@ export const RemoteFileBrowserModal = memo(
                                 flexShrink={0}
                                 p={2}
                                 spacing={1}
-                                w="150px"
+                                w="178px"
                             >
                                 <Text
                                     color="var(--fg-300)"
@@ -619,18 +642,53 @@ export const RemoteFileBrowserModal = memo(
                                 {(listing?.shortcuts ?? []).map((sc) => {
                                     const active = listing?.currentPath === sc.path;
                                     return (
-                                        <Button
-                                            justifyContent="flex-start"
+                                        <Tooltip
                                             key={sc.id}
-                                            leftIcon={<Icon as={getShortcutIcon(sc.id)} />}
-                                            size="sm"
-                                            variant={active ? 'solid' : 'ghost'}
-                                            onClick={() => {
-                                                fetchDirectory(sc.path).catch(() => undefined);
-                                            }}
+                                            label={`${sc.name}: ${formatFileCount(
+                                                sc.fileCount
+                                            )} · ${formatFileSize(sc.size)}`}
+                                            placement="right"
                                         >
-                                            {sc.name}
-                                        </Button>
+                                            <Button
+                                                h="auto"
+                                                justifyContent="space-between"
+                                                px={2}
+                                                py={1.5}
+                                                size="sm"
+                                                variant={active ? 'solid' : 'ghost'}
+                                                onClick={() => {
+                                                    fetchDirectory(sc.path).catch(() => undefined);
+                                                }}
+                                            >
+                                                <HStack
+                                                    minW={0}
+                                                    spacing={2}
+                                                >
+                                                    <Icon as={getShortcutIcon(sc.id)} />
+                                                    <Text isTruncated>{sc.name}</Text>
+                                                </HStack>
+                                                <VStack
+                                                    align="flex-end"
+                                                    flexShrink={0}
+                                                    spacing={0}
+                                                >
+                                                    <Text
+                                                        color="var(--fg-300)"
+                                                        fontSize="10px"
+                                                        lineHeight="1.15"
+                                                    >
+                                                        {sc.fileCount}
+                                                    </Text>
+                                                    <Text
+                                                        color="var(--fg-300)"
+                                                        fontSize="9px"
+                                                        lineHeight="1.15"
+                                                    >
+                                                        {formatFileSize(sc.size)}
+                                                    </Text>
+                                                </VStack>
+                                            </Button>
+                                        </Tooltip>
                                     );
                                 })}
                             </VStack>
@@ -739,10 +797,12 @@ export const RemoteFileBrowserModal = memo(
                                                         flexShrink={0}
                                                         fontSize="xs"
                                                         textAlign="right"
-                                                        w="68px"
+                                                        w="130px"
                                                     >
                                                         {entry.isDir
-                                                            ? 'Pasta'
+                                                            ? `${formatFileCount(
+                                                                  entry.fileCount
+                                                              )} · ${formatFileSize(entry.size)}`
                                                             : formatFileSize(entry.size)}
                                                     </Text>
                                                     <Text
@@ -821,7 +881,11 @@ export const RemoteFileBrowserModal = memo(
                                                 mt={1}
                                             >
                                                 {primarySelectedEntry.isDir
-                                                    ? 'Diretório'
+                                                    ? `Pasta · ${formatFileCount(
+                                                          primarySelectedEntry.fileCount
+                                                      )} · ${formatFileSize(
+                                                          primarySelectedEntry.size
+                                                      )}`
                                                     : `${formatFileSize(
                                                           primarySelectedEntry.size
                                                       )} · ${formatDate(
@@ -850,6 +914,13 @@ export const RemoteFileBrowserModal = memo(
                                                     leftIcon={<MdDownload />}
                                                     size="xs"
                                                     variant="outline"
+                                                    onClick={() => {
+                                                        showWebToast({
+                                                            title: 'Download iniciado',
+                                                            description: primarySelectedEntry.name,
+                                                            status: 'info',
+                                                        });
+                                                    }}
                                                 >
                                                     Baixar
                                                 </Button>

@@ -5,6 +5,7 @@ import { log } from '../../common/log';
 import { SchemaMap } from '../../common/SchemaMap';
 import { createUniqueId, deriveUniqueId } from '../../common/util';
 import { parseSaveFile } from '../../web/saveFileWeb';
+import { showWebToast } from '../../web/webDialogs';
 import { uploadWebFiles } from '../../web/webFsClient';
 import { emitWebIpcEvent } from '../../web/webIpc';
 import { ipcRenderer } from '../safeIpc';
@@ -134,12 +135,22 @@ const openChainnerFileProcessor: DataTransferProcessor = (dataTransfer) => {
                             path: file.name,
                             saveData,
                         });
+                        showWebToast({
+                            title: 'Chain carregada',
+                            description: `${file.name} aberta via arrastar e soltar.`,
+                            status: 'success',
+                        });
                     })
                     .catch((error) => {
                         emitWebIpcEvent('file-open', {
                             kind: 'Error',
                             path: file.name,
                             error: String(error),
+                        });
+                        showWebToast({
+                            title: 'Erro ao carregar chain',
+                            description: `${file.name}: ${String(error)}`,
+                            status: 'error',
                         });
                     });
                 return true;

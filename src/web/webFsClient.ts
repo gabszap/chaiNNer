@@ -6,6 +6,7 @@ export interface WebFileEntry {
     relativePath: string;
     isDir: boolean;
     size: number;
+    fileCount: number;
     modifiedMs: number;
     ext: string;
     isImage: boolean;
@@ -20,6 +21,8 @@ export interface WebShortcutEntry {
     id: string;
     name: string;
     path: string;
+    size: number;
+    fileCount: number;
 }
 
 export interface WebDirectoryListing {

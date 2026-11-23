@@ -5,7 +5,7 @@ import { ChannelArgs, InvokeChannels, SendChannels } from '../common/safeIpc';
 import { ChainnerSettings, defaultSettings } from '../common/settings/settings';
 import { parseSaveFile, stringifySaveFile } from './saveFileWeb';
 import { getWebBackendUrl, setWebBackendUrl } from './webConfig';
-import { openRemoteFileDialog, openWebPromptDialog } from './webDialogs';
+import { openRemoteFileDialog, openWebPromptDialog, showWebToast } from './webDialogs';
 import { readWebTextFile, uploadWebFiles, writeWebTextFile } from './webFsClient';
 import type { ParsedSaveData, SaveData } from '../main/SaveFile';
 import type { FileFilter } from 'electron/common';
@@ -64,17 +64,23 @@ const saveSettings = (settings: ChainnerSettings): void => {
 };
 
 const downloadChainFile = (saveData: SaveData, filename: string): void => {
+    const finalName = filename.endsWith('.chn') ? filename : `${filename}.chn`;
     const version = window.appConstants.appVersion;
     const serialized = stringifySaveFile(saveData, version);
     const blob = new Blob([serialized], { type: 'application/json' });
     const objectUrl = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = objectUrl;
-    anchor.download = filename.endsWith('.chn') ? filename : `${filename}.chn`;
+    anchor.download = finalName;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
     setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    showWebToast({
+        title: 'Download iniciado',
+        description: `${finalName} baixado para o seu computador.`,
+        status: 'info',
+    });
 };
 
 export const triggerDownloadChainAs = (): void => {
@@ -97,11 +103,21 @@ export const openLocalChainFile = (): void => {
                 path: file.name,
                 saveData,
             });
+            showWebToast({
+                title: 'Chain carregada',
+                description: `${file.name} aberta do seu computador.`,
+                status: 'success',
+            });
         } catch (error) {
             emitWebIpcEvent('file-open', {
                 kind: 'Error',
                 path: file.name,
                 error: String(error),
+            });
+            showWebToast({
+                title: 'Erro ao carregar chain',
+                description: `${file.name}: ${String(error)}`,
+                status: 'error',
             });
         }
     };
@@ -127,11 +143,21 @@ export const openServerChainFile = async (): Promise<void> => {
             path: file.path,
             saveData,
         });
+        showWebToast({
+            title: 'Chain carregada do servidor',
+            description: file.relativePath || file.name,
+            status: 'success',
+        });
     } catch (error) {
         emitWebIpcEvent('file-open', {
             kind: 'Error',
             path: selectedPath,
             error: String(error),
+        });
+        showWebToast({
+            title: 'Erro ao carregar chain',
+            description: String(error),
+            status: 'error',
         });
     }
 };
@@ -264,12 +290,22 @@ const handleInvoke = async (
             try {
                 const file = await readWebTextFile(targetPath);
                 const saveData = parseSaveFile(file.content);
+                showWebToast({
+                    title: 'Chain carregada do servidor',
+                    description: file.relativePath || file.name,
+                    status: 'success',
+                });
                 return {
                     kind: 'Success',
                     path: file.path,
                     saveData,
                 } satisfies FileOpenResult<ParsedSaveData>;
             } catch (error) {
+                showWebToast({
+                    title: 'Erro ao carregar chain',
+                    description: String(error),
+                    status: 'error',
+                });
                 return {
                     kind: 'Error',
                     path: targetPath,
@@ -284,7 +320,12 @@ const handleInvoke = async (
                 ? savePath
                 : `chains/${savePath.endsWith('.chn') ? savePath : `${savePath}.chn`}`;
             const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
-            await writeWebTextFile(serverTarget, serialized);
+            const saved = await writeWebTextFile(serverTarget, serialized);
+            showWebToast({
+                title: 'Chain salva no servidor',
+                description: saved.relativePath || saved.name,
+                status: 'success',
+            });
             return undefined;
         }
         case 'file-save-as-json': {
@@ -318,6 +359,11 @@ const handleInvoke = async (
 
             const serialized = stringifySaveFile(saveData, window.appConstants.appVersion);
             const saved = await writeWebTextFile(`chains/${finalName}`, serialized);
+            showWebToast({
+                title: 'Chain salva no servidor',
+                description: saved.relativePath || saved.name,
+                status: 'success',
+            });
             return { kind: 'Success', path: saved.path } satisfies FileSaveResult;
         }
         case 'file-select': {

@@ -31,6 +31,7 @@ class FileEntry(TypedDict):
     relativePath: str
     isDir: bool
     size: int
+    fileCount: int
     modifiedMs: int
     ext: str
     isImage: bool
@@ -45,6 +46,8 @@ class ShortcutEntry(TypedDict):
     id: str
     name: str
     path: str
+    size: int
+    fileCount: int
 
 
 class DirectoryListing(TypedDict):
@@ -133,6 +136,29 @@ def _normalize_extensions(extensions: list[str] | None) -> set[str] | None:
     return normalized or None
 
 
+def _compute_dir_stats(directory: Path, resolved_root: Path) -> tuple[int, int]:
+    """Returns (file_count, total_size_bytes) recursively inside `directory`."""
+    file_count = 0
+    total_size = 0
+    try:
+        for dirpath, _dirnames, filenames in os.walk(directory, followlinks=False):
+            current_dir = Path(dirpath).resolve()
+            if not current_dir.is_relative_to(resolved_root):
+                continue
+            for fname in filenames:
+                fpath = Path(dirpath) / fname
+                try:
+                    if fpath.is_symlink():
+                        continue
+                    total_size += fpath.stat().st_size
+                    file_count += 1
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return file_count, total_size
+
+
 def list_directory(
     root: Path,
     raw_path: str | None = None,
@@ -166,13 +192,19 @@ def list_directory(
         if not is_dir and allowed_exts is not None and ext not in allowed_exts:
             continue
 
+        if is_dir:
+            dir_files, dir_size = _compute_dir_stats(resolved_child, resolved_root)
+        else:
+            dir_files, dir_size = 0, stat.st_size
+
         entries.append(
             {
                 "name": child.name,
                 "path": str(resolved_child),
                 "relativePath": _to_relative_posix(resolved_root, resolved_child),
                 "isDir": is_dir,
-                "size": 0 if is_dir else stat.st_size,
+                "size": dir_size,
+                "fileCount": dir_files,
                 "modifiedMs": int(stat.st_mtime * 1000),
                 "ext": ext,
                 "isImage": (not is_dir) and (ext in IMAGE_EXTENSIONS),
@@ -196,13 +228,28 @@ def list_directory(
         None if target == resolved_root else str(target.parent.resolve())
     )
 
+    root_files, root_size = _compute_dir_stats(resolved_root, resolved_root)
     shortcuts: list[ShortcutEntry] = [
-        {"id": "root", "name": "Raiz", "path": str(resolved_root)},
-        *[
-            {"id": sub, "name": sub, "path": str((resolved_root / sub).resolve())}
-            for sub in DEFAULT_SUBDIRS
-        ],
+        {
+            "id": "root",
+            "name": "Raiz",
+            "path": str(resolved_root),
+            "size": root_size,
+            "fileCount": root_files,
+        }
     ]
+    for sub in DEFAULT_SUBDIRS:
+        sub_path = (resolved_root / sub).resolve()
+        sub_files, sub_size = _compute_dir_stats(sub_path, resolved_root)
+        shortcuts.append(
+            {
+                "id": sub,
+                "name": sub,
+                "path": str(sub_path),
+                "size": sub_size,
+                "fileCount": sub_files,
+            }
+        )
 
     return {
         "root": str(resolved_root),
@@ -254,6 +301,7 @@ def save_uploaded_file(
         "relativePath": _to_relative_posix(resolved_root, resolved_dest),
         "isDir": False,
         "size": stat.st_size,
+        "fileCount": 0,
         "modifiedMs": int(stat.st_mtime * 1000),
         "ext": ext,
         "isImage": ext in IMAGE_EXTENSIONS,
@@ -287,6 +335,7 @@ def create_directory(
         "relativePath": _to_relative_posix(resolved_root, new_dir),
         "isDir": True,
         "size": 0,
+        "fileCount": 0,
         "modifiedMs": int(stat.st_mtime * 1000),
         "ext": "",
         "isImage": False,
@@ -343,13 +392,18 @@ def rename_entry(root: Path, raw_path: str, new_name: str) -> FileEntry:
     stat = dest.stat()
     is_dir = dest.is_dir()
     ext = "" if is_dir else dest.suffix.lower()
+    if is_dir:
+        dir_files, dir_size = _compute_dir_stats(dest, resolved_root)
+    else:
+        dir_files, dir_size = 0, stat.st_size
 
     return {
         "name": dest.name,
         "path": str(dest),
         "relativePath": _to_relative_posix(resolved_root, dest),
         "isDir": is_dir,
-        "size": 0 if is_dir else stat.st_size,
+        "size": dir_size,
+        "fileCount": dir_files,
         "modifiedMs": int(stat.st_mtime * 1000),
         "ext": ext,
         "isImage": (not is_dir) and (ext in IMAGE_EXTENSIONS),
@@ -406,6 +460,7 @@ def write_text_file(root: Path, target_path: str, content: str) -> FileEntry:
         "relativePath": _to_relative_posix(resolved_root, dest),
         "isDir": False,
         "size": stat.st_size,
+        "fileCount": 0,
         "modifiedMs": int(stat.st_mtime * 1000),
         "ext": ext,
         "isImage": ext in IMAGE_EXTENSIONS,

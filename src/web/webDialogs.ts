@@ -22,9 +22,17 @@ export interface WebPromptDialogOptions {
     confirmLabel?: string;
 }
 
+export interface WebToastOptions {
+    title?: string;
+    description: string;
+    status: 'success' | 'info' | 'warning' | 'error';
+    duration?: number;
+}
+
 interface WebDialogHandlers {
     openFileBrowser: (options: RemoteFileDialogOptions) => Promise<RemoteFileDialogResult>;
     openPrompt: (options: WebPromptDialogOptions) => Promise<string | null>;
+    showToast?: (options: WebToastOptions) => void;
 }
 
 let registeredHandlers: WebDialogHandlers | null = null;
@@ -47,4 +55,8 @@ export const openWebPromptDialog = (options: WebPromptDialogOptions): Promise<st
         return Promise.resolve(null);
     }
     return registeredHandlers.openPrompt(options);
+};
+
+export const showWebToast = (options: WebToastOptions): void => {
+    registeredHandlers?.showToast?.(options);
 };

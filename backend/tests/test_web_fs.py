@@ -100,3 +100,23 @@ def test_write_and_read_text_chain_file(tmp_path: Path):
 
     with pytest.raises(PermissionError):
         write_text_file(root, "../escape.chn", "{}")
+
+
+def test_directory_file_count_and_total_size(tmp_path: Path):
+    root = ensure_sandbox_dirs(tmp_path / "sandbox")
+    save_uploaded_file(root, "inputs", "a.png", b"12345")
+    save_uploaded_file(root, "inputs/sub", "b.png", b"1234567890")
+
+    root_listing = list_directory(root, "")
+    inputs_entry = next(e for e in root_listing["entries"] if e["name"] == "inputs")
+    assert inputs_entry["isDir"] is True
+    assert inputs_entry["fileCount"] == 2
+    assert inputs_entry["size"] == 15
+
+    inputs_shortcut = next(s for s in root_listing["shortcuts"] if s["id"] == "inputs")
+    assert inputs_shortcut["fileCount"] == 2
+    assert inputs_shortcut["size"] == 15
+
+    root_shortcut = next(s for s in root_listing["shortcuts"] if s["id"] == "root")
+    assert root_shortcut["fileCount"] == 2
+    assert root_shortcut["size"] == 15

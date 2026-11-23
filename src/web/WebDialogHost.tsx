@@ -10,6 +10,7 @@ import {
     ModalHeader,
     ModalOverlay,
     Text,
+    useToast,
 } from '@chakra-ui/react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { RemoteFileBrowserModal } from './RemoteFileBrowserModal';
@@ -31,6 +32,7 @@ interface ActivePromptDialog {
 }
 
 export const WebDialogHost = memo(() => {
+    const toast = useToast();
     const [fileDialog, setFileDialog] = useState<ActiveFileDialog | null>(null);
     const [promptDialog, setPromptDialog] = useState<ActivePromptDialog | null>(null);
     const [promptValue, setPromptValue] = useState('');
@@ -47,11 +49,21 @@ export const WebDialogHost = memo(() => {
                     setPromptValue(options.defaultValue ?? '');
                     setPromptDialog({ options, resolve });
                 }),
+            showToast: (options) => {
+                toast({
+                    title: options.title,
+                    description: options.description,
+                    status: options.status,
+                    duration: options.duration ?? 3200,
+                    isClosable: true,
+                    position: 'bottom-right',
+                });
+            },
         });
         return () => {
             registerWebDialogHandlers(null);
         };
-    }, []);
+    }, [toast]);
 
     const handleFileDialogClose = useCallback(
         (result: RemoteFileDialogResult) => {
