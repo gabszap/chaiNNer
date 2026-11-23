@@ -17,6 +17,7 @@ import { BsFileEarmarkPlus } from 'react-icons/bs';
 import { MdContentCopy, MdFolder } from 'react-icons/md';
 import { useContext } from 'use-context-selector';
 import { log } from '../../../common/log';
+import { uploadWebFiles } from '../../../web/webFsClient';
 import { AlertBoxContext } from '../../contexts/AlertBoxContext';
 import { getFilePath, getSingleFileWithExtension } from '../../helpers/dataTransfer';
 import { useContextMenu } from '../../hooks/useContextMenu';
@@ -82,6 +83,41 @@ export const FileInput = memo(
 
             if (event.dataTransfer.types.includes('Files')) {
                 event.stopPropagation();
+
+                if (window.isWebUI) {
+                    if (event.dataTransfer.files.length !== 1) {
+                        sendToast({
+                            status: 'error',
+                            description: `Only one file is accepted by ${label}.`,
+                        });
+                        return;
+                    }
+                    const [droppedFile] = event.dataTransfer.files;
+                    const ext = path.extname(droppedFile.name).toLowerCase();
+                    if (!filetypes.includes(ext)) {
+                        sendToast({
+                            status: 'error',
+                            description: `${label} does not accept ${ext} files.`,
+                        });
+                        return;
+                    }
+                    uploadWebFiles([droppedFile], 'inputs')
+                        .then((uploaded) => {
+                            if (uploaded.length > 0) {
+                                const saved = uploaded[0];
+                                setFilePath(saved.path);
+                                setLastDirectory(path.dirname(saved.path));
+                            }
+                        })
+                        .catch((err) => {
+                            log.error(err);
+                            sendToast({
+                                status: 'error',
+                                description: `Upload failed: ${String(err)}`,
+                            });
+                        });
+                    return;
+                }
 
                 const p = getSingleFileWithExtension(event.dataTransfer, filetypes);
                 if (p) {

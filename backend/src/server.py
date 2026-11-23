@@ -579,6 +579,8 @@ async def sse(request: Request):
     if response is None:
         return
 
+    await response.send(": connected\n\n")
+
     with ctx.queue.subscribe() as sub_queue:
         while True:
             try:

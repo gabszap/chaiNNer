@@ -15,6 +15,7 @@ import psutil
 from sanic import Sanic
 from sanic.log import access_logger
 from sanic.request import Request
+from sanic.response import file as file_response
 from sanic.response import json
 from sanic_cors import CORS
 
@@ -36,6 +37,14 @@ from logger import logger, setup_logger
 from response import error_response, success_response
 from server_config import ServerConfig
 from server_process_helper import WorkerServer
+from web_fs import (
+    create_directory,
+    ensure_sandbox_dirs,
+    get_default_web_root,
+    list_directory,
+    resolve_sandbox_path,
+    save_uploaded_file,
+)
 
 
 class AppContext:
@@ -80,6 +89,13 @@ class AppContext:
     def setup_queue(self) -> EventQueue:
         return EventQueue()
 
+    @cached_property
+    def web_root(self) -> Path:
+        root = get_default_web_root(self.config.web_root, self.config.storage_dir)
+        resolved = ensure_sandbox_dirs(root)
+        logger.info("WebUI file sandbox root: %s", resolved)
+        return resolved
+
     @staticmethod
     def get(app_instance: Sanic) -> AppContext:
         assert isinstance(app_instance.ctx, AppContext)
@@ -89,6 +105,7 @@ class AppContext:
 app = Sanic("chaiNNer_host", ctx=AppContext())
 app.config.REQUEST_TIMEOUT = sys.maxsize
 app.config.RESPONSE_TIMEOUT = sys.maxsize
+app.config.REQUEST_MAX_SIZE = 2 * 1024 * 1024 * 1024  # 2 GB for media/models
 CORS(app)
 
 
@@ -367,6 +384,8 @@ async def setup_sse(request: Request):
     if response is None:
         return
 
+    await response.send(": connected\n\n")
+
     with ctx.setup_queue.subscribe() as sub_queue:
         while True:
             try:
@@ -381,6 +400,77 @@ async def setup_sse(request: Request):
                     break
             except Exception:
                 break
+
+
+@app.get("/web/fs/list")
+async def web_fs_list(request: Request):
+    ctx = AppContext.get(request.app)
+    raw_path = request.args.get("path", "")
+    ext_arg = request.args.get("extensions", "")
+    extensions = [e.strip() for e in ext_arg.split(",") if e.strip()] if ext_arg else None
+    try:
+        listing = list_directory(ctx.web_root, raw_path, extensions)
+        return json(listing)
+    except Exception as ex:
+        logger.exception("Error listing web directory: %s", ex)
+        return json({"error": str(ex)}, status=400)
+
+
+@app.post("/web/fs/upload")
+async def web_fs_upload(request: Request):
+    ctx = AppContext.get(request.app)
+    if not request.files or "file" not in request.files:
+        return json({"error": "Missing 'file' field in multipart upload."}, status=400)
+
+    target_dir = request.form.get("dir", "inputs") if request.form else "inputs"
+    uploaded = request.files.getlist("file")
+    saved = []
+    try:
+        for item in uploaded:
+            entry = save_uploaded_file(ctx.web_root, target_dir, item.name, item.body)
+            saved.append(entry)
+        return json({"files": saved})
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+    except Exception as ex:
+        logger.exception("Error uploading file: %s", ex)
+        return json({"error": str(ex)}, status=400)
+
+
+@app.get("/web/fs/file")
+async def web_fs_file(request: Request):
+    ctx = AppContext.get(request.app)
+    raw_path = request.args.get("path", "")
+    download = request.args.get("download", "0") == "1"
+    if not raw_path:
+        return json({"error": "Missing 'path' query parameter."}, status=400)
+
+    try:
+        target = resolve_sandbox_path(ctx.web_root, raw_path)
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+
+    if not target.exists() or not target.is_file():
+        return json({"error": "File not found."}, status=404)
+
+    if download:
+        return await file_response(str(target), filename=target.name)
+    return await file_response(str(target))
+
+
+@app.post("/web/fs/mkdir")
+async def web_fs_mkdir(request: Request):
+    ctx = AppContext.get(request.app)
+    payload = request.json or {}
+    parent_path = payload.get("parentPath", "")
+    name = payload.get("name", "")
+    try:
+        entry = create_directory(ctx.web_root, parent_path, name)
+        return json(entry)
+    except PermissionError as ex:
+        return json({"error": str(ex)}, status=403)
+    except Exception as ex:
+        return json({"error": str(ex)}, status=400)
 
 
 @app.post("/shutdown")

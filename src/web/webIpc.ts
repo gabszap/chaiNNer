@@ -1,43 +1,23 @@
-/* eslint-disable no-alert */
+import path from 'path';
 import { FileSaveResult, PythonInfo, Version } from '../common/common-types';
 import { log } from '../common/log';
 import { ChannelArgs, InvokeChannels, SendChannels } from '../common/safeIpc';
 import { ChainnerSettings, defaultSettings } from '../common/settings/settings';
 import { parseSaveFile, stringifySaveFile } from './saveFileWeb';
+import { getWebBackendUrl, setWebBackendUrl } from './webConfig';
+import { openRemoteFileDialog, openWebPromptDialog } from './webDialogs';
 import type { SaveData } from '../main/SaveFile';
+import type { FileFilter } from 'electron/common';
 
-declare const CHAINNER_BACKEND_URL: string | undefined;
+export { getWebBackendUrl, setWebBackendUrl };
 
 const SETTINGS_STORAGE_KEY = 'chainner-web-settings';
-const BACKEND_URL_STORAGE_KEY = 'chainner-web-backend-url';
 const CLIPBOARD_BUFFER_PREFIX = 'chainner-web-clipboard:';
 
 type ListenerFn = (event: unknown, ...args: unknown[]) => void;
 
 const listeners = new Map<string, Set<ListenerFn>>();
 const memoryClipboardBuffers = new Map<string, string>();
-
-const normalizeBackendUrl = (url: string): string => url.trim().replace(/\/+$/, '');
-
-export const getWebBackendUrl = (): string => {
-    const stored = localStorage.getItem(BACKEND_URL_STORAGE_KEY);
-    if (stored && stored.trim()) {
-        return normalizeBackendUrl(stored);
-    }
-    if (typeof CHAINNER_BACKEND_URL === 'string' && CHAINNER_BACKEND_URL.trim()) {
-        return normalizeBackendUrl(CHAINNER_BACKEND_URL);
-    }
-    return '/api';
-};
-
-export const setWebBackendUrl = (url: string): void => {
-    const normalized = normalizeBackendUrl(url);
-    if (!normalized) {
-        localStorage.removeItem(BACKEND_URL_STORAGE_KEY);
-    } else {
-        localStorage.setItem(BACKEND_URL_STORAGE_KEY, normalized);
-    }
-};
 
 export const emitWebIpcEvent = <C extends keyof SendChannels>(
     channel: C,
@@ -139,6 +119,20 @@ const fetchPythonInfo = async (): Promise<PythonInfo> => {
     };
 };
 
+const extractExtensions = (filters: FileFilter[] | undefined): string[] => {
+    if (!Array.isArray(filters)) return [];
+    const exts = new Set<string>();
+    filters.forEach((f) => {
+        f.extensions.forEach((ext) => {
+            const cleaned = ext.trim().replace(/^\./, '').toLowerCase();
+            if (cleaned && cleaned !== '*') {
+                exts.add(cleaned);
+            }
+        });
+    });
+    return [...exts];
+};
+
 const handleInvoke = async (
     channel: keyof InvokeChannels,
     ...args: unknown[]
@@ -175,7 +169,13 @@ const handleInvoke = async (
             const saveData = args[0] as SaveData;
             const defaultPath = typeof args[1] === 'string' && args[1] ? args[1] : 'chain.chn';
             const suggested = defaultPath.split(/[\\/]/).pop() || 'chain.chn';
-            const chosen = window.prompt('Nome do arquivo .chn para download:', suggested);
+            const chosen = await openWebPromptDialog({
+                title: 'Salvar chain (.chn)',
+                description: 'Escolha o nome do arquivo para download:',
+                placeholder: 'minha-chain.chn',
+                defaultValue: suggested,
+                confirmLabel: 'Baixar .chn',
+            });
             if (!chosen || !chosen.trim()) {
                 return { kind: 'Canceled' } satisfies FileSaveResult;
             }
@@ -186,26 +186,36 @@ const handleInvoke = async (
             return { kind: 'Success', path: finalName } satisfies FileSaveResult;
         }
         case 'file-select': {
-            const defaultDir = typeof args[2] === 'string' ? args[2] : '';
-            const entered = window.prompt(
-                'Caminho do arquivo na VPS (ex: /data/chainner/inputs/imagem.png):',
-                defaultDir
-            );
-            if (!entered || !entered.trim()) {
-                return { canceled: true, filePaths: [] };
-            }
-            return { canceled: false, filePaths: [entered.trim()] };
+            const filters = args[0] as FileFilter[] | undefined;
+            const allowMultiple = Boolean(args[1]);
+            const initialPath = typeof args[2] === 'string' && args[2] ? args[2] : undefined;
+            const filterTitle = filters?.[0]?.name ? `Selecionar: ${filters[0].name}` : undefined;
+            return openRemoteFileDialog({
+                mode: 'file',
+                title: filterTitle,
+                initialPath,
+                extensions: extractExtensions(filters),
+                allowMultiple,
+            });
         }
         case 'dir-select': {
-            const defaultDir = typeof args[0] === 'string' ? args[0] : '';
-            const entered = window.prompt(
-                'Caminho do diretório na VPS (ex: /data/chainner/outputs):',
-                defaultDir
-            );
-            if (!entered || !entered.trim()) {
-                return { canceled: true, filePaths: [] };
+            const initialPath = typeof args[0] === 'string' && args[0] ? args[0] : undefined;
+            return openRemoteFileDialog({
+                mode: 'directory',
+                initialPath,
+            });
+        }
+        case 'shell-showItemInFolder': {
+            const fullPath = typeof args[0] === 'string' ? args[0] : '';
+            if (fullPath) {
+                await openRemoteFileDialog({
+                    mode: 'browse',
+                    title: 'Arquivos do servidor',
+                    initialPath: path.dirname(fullPath),
+                    highlightPath: fullPath,
+                });
             }
-            return { canceled: false, filePaths: [entered.trim()] };
+            return undefined;
         }
         case 'clipboard-writeBuffer-fromString': {
             const format = String(args[0] ?? '');
@@ -251,7 +261,6 @@ const handleInvoke = async (
         case 'watch-files':
         case 'unwatch-file':
         case 'unwatch-files':
-        case 'shell-showItemInFolder':
         case 'shell-openPath':
         case 'restart-backend':
         case 'relaunch-application':

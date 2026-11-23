@@ -60,6 +60,13 @@ class ServerConfig:
     Usage: `--dev`
     """
 
+    web_root: str | None = None
+    """
+    Root sandbox directory for WebUI file browsing, uploads, and downloads.
+
+    Usage: `--web-root /data/chainner`
+    """
+
     @staticmethod
     def parse_argv() -> ServerConfig:
         parser = argparse.ArgumentParser(description="ChaiNNer's server.")
@@ -105,6 +112,11 @@ class ServerConfig:
             action="store_true",
             help="Run in development mode.",
         )
+        parser.add_argument(
+            "--web-root",
+            type=str,
+            help="Root sandbox directory for WebUI file browsing, uploads, and downloads.",
+        )
 
         parsed = parser.parse_args()
 
@@ -117,4 +129,5 @@ class ServerConfig:
             logs_dir=parsed.logs_dir or None,
             trace=parsed.trace,
             dev_mode=parsed.dev,
+            web_root=parsed.web_root or None,
         )

@@ -1,4 +1,4 @@
-/* eslint-disable no-alert, i18next/no-literal-string */
+/* eslint-disable i18next/no-literal-string */
 import {
     Button,
     IconButton,
@@ -12,6 +12,7 @@ import {
 import { memo, useCallback } from 'react';
 import {
     MdCreateNewFolder,
+    MdFolder,
     MdFolderOpen,
     MdMenu,
     MdRedo,
@@ -20,7 +21,10 @@ import {
     MdSettingsEthernet,
     MdUndo,
 } from 'react-icons/md';
-import { emitWebIpcEvent, getWebBackendUrl, openLocalChainFile, setWebBackendUrl } from './webIpc';
+import { getWebBackendUrl, setWebBackendUrl } from './webConfig';
+import { WebDialogHost } from './WebDialogHost';
+import { openRemoteFileDialog, openWebPromptDialog } from './webDialogs';
+import { emitWebIpcEvent, openLocalChainFile } from './webIpc';
 
 export const WebFileMenu = memo(() => {
     const handleNew = useCallback(() => {
@@ -51,15 +55,30 @@ export const WebFileMenu = memo(() => {
         emitWebIpcEvent('history-redo');
     }, []);
 
+    const handleBrowseFiles = useCallback(() => {
+        openRemoteFileDialog({
+            mode: 'browse',
+            title: 'Arquivos do servidor',
+            initialPath: 'outputs',
+        }).catch(() => undefined);
+    }, []);
+
     const handleBackendUrl = useCallback(() => {
         const current = getWebBackendUrl();
-        const next = window.prompt(
-            'URL do backend chaiNNer (deixe vazio para usar o padrão /api):',
-            current
-        );
-        if (next === null) return;
-        setWebBackendUrl(next);
-        window.location.reload();
+        openWebPromptDialog({
+            title: 'URL do backend chaiNNer',
+            description:
+                'Informe a URL base do backend (deixe vazio para voltar ao padrão /api via proxy).',
+            placeholder: '/api',
+            defaultValue: current,
+            confirmLabel: 'Salvar e recarregar',
+        })
+            .then((next) => {
+                if (next === null) return;
+                setWebBackendUrl(next);
+                window.location.reload();
+            })
+            .catch(() => undefined);
     }, []);
 
     if (!window.isWebUI) {
@@ -115,6 +134,12 @@ export const WebFileMenu = memo(() => {
                     </MenuItem>
                     <MenuDivider />
                     <MenuItem
+                        icon={<MdFolder />}
+                        onClick={handleBrowseFiles}
+                    >
+                        Arquivos do servidor...
+                    </MenuItem>
+                    <MenuItem
                         icon={<MdSettingsEthernet />}
                         onClick={handleBackendUrl}
                     >
@@ -122,6 +147,16 @@ export const WebFileMenu = memo(() => {
                     </MenuItem>
                 </MenuList>
             </Menu>
+            <Tooltip label="Arquivos do servidor (inputs / outputs / models)">
+                <Button
+                    leftIcon={<MdFolder />}
+                    size="sm"
+                    variant="ghost"
+                    onClick={handleBrowseFiles}
+                >
+                    Arquivos
+                </Button>
+            </Tooltip>
             <Tooltip label="Desfazer (Ctrl+Z)">
                 <IconButton
                     aria-label="Desfazer"
@@ -140,6 +175,7 @@ export const WebFileMenu = memo(() => {
                     onClick={handleRedo}
                 />
             </Tooltip>
+            <WebDialogHost />
         </>
     );
 });
