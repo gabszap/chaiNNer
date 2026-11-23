@@ -345,7 +345,7 @@ async def install_dependencies_request(request: Request):
 
 @app.get("/sse")
 async def sse(request: Request):
-    headers = {"Cache-Control": "no-cache"}
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     response = await request.respond(headers=headers, content_type="text/event-stream")
     if response is None:
         return
@@ -362,19 +362,25 @@ async def sse(request: Request):
 @app.get("/setup-sse")
 async def setup_sse(request: Request):
     ctx = AppContext.get(request.app)
-    headers = {"Cache-Control": "no-cache"}
+    headers = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
     response = await request.respond(headers=headers, content_type="text/event-stream")
     if response is None:
         return
 
-    while True:
-        try:
-            message = await ctx.setup_queue.get()
-            await response.send(
-                f"event: {message['event']}\ndata: {stringify(message['data'])}\n\n"
-            )
-        except Exception:
-            break
+    with ctx.setup_queue.subscribe() as sub_queue:
+        while True:
+            try:
+                message = await asyncio.wait_for(sub_queue.get(), timeout=25.0)
+                await response.send(
+                    f"event: {message['event']}\ndata: {stringify(message['data'])}\n\n"
+                )
+            except asyncio.TimeoutError:
+                try:
+                    await response.send(": keepalive\n\n")
+                except Exception:
+                    break
+            except Exception:
+                break
 
 
 @app.post("/shutdown")

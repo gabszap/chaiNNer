@@ -2,6 +2,7 @@
 declare var startupFile: string | null;
 
 interface Window {
+    isWebUI?: boolean;
     unsafeIpcRenderer: import('electron').IpcRenderer;
     electronFileUtils: {
         getPathForFile: (file: File) => string;
