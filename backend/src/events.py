@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 import threading
 import time
 from abc import ABC, abstractmethod
@@ -144,23 +146,43 @@ class _FilteredEventConsumer(EventConsumer):
 
 class EventQueue(EventConsumer):
     def __init__(self):
-        self.queue = asyncio.Queue()
+        self.queue: asyncio.Queue[Event] = asyncio.Queue()
+        self._subscribers: set[asyncio.Queue[Event]] = set()
+
+    @contextmanager
+    def subscribe(self) -> Iterator[asyncio.Queue[Event]]:
+        sub_queue: asyncio.Queue[Event] = asyncio.Queue()
+        if not self._subscribers:
+            while not self.queue.empty():
+                try:
+                    sub_queue.put_nowait(self.queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
+        self._subscribers.add(sub_queue)
+        try:
+            yield sub_queue
+        finally:
+            self._subscribers.discard(sub_queue)
 
     async def get(self) -> Event:
         return await self.queue.get()
 
     def put(self, event: Event) -> None:
-        self.queue.put_nowait(event)
+        if self._subscribers:
+            for sub_queue in list(self._subscribers):
+                sub_queue.put_nowait(event)
+        else:
+            self.queue.put_nowait(event)
 
     async def wait_until_empty(self, timeout: float) -> None:
         while timeout > 0:
-            if self.queue.empty():
+            if self.queue.empty() and all(sub.empty() for sub in self._subscribers):
                 return
             await asyncio.sleep(0.01)
             timeout -= 0.01
 
     async def put_and_wait(self, event: Event, timeout: float = float("inf")) -> None:
-        await self.queue.put(event)
+        self.put(event)
         await self.wait_until_empty(timeout)
 
 

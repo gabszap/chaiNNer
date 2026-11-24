@@ -276,3 +276,44 @@ def test_node_finish_event_structure():
     assert event["event"] == "node-finish"
     assert event["data"]["nodeId"] == NodeId("test-node")
     assert event["data"]["executionTime"] == 2.5
+
+
+@pytest.mark.asyncio
+async def test_event_queue_subscribe_fanout():
+    """Multiple SSE subscribers receive the same events independently."""
+    queue = EventQueue()
+    event1: NodeStartEvent = {
+        "event": "node-start",
+        "data": {"nodeId": NodeId("node1")},
+    }
+    event2: NodeFinishEvent = {
+        "event": "node-finish",
+        "data": {"nodeId": NodeId("node1"), "executionTime": 0.5},
+    }
+
+    with queue.subscribe() as sub1, queue.subscribe() as sub2:
+        queue.put(event1)
+        queue.put(event2)
+
+        assert await sub1.get() == event1
+        assert await sub1.get() == event2
+        assert await sub2.get() == event1
+        assert await sub2.get() == event2
+
+    # After both subscribers disconnect, events fall back to the default queue
+    queue.put(event1)
+    assert await queue.get() == event1
+
+
+@pytest.mark.asyncio
+async def test_event_queue_first_subscriber_drains_buffered_events():
+    """First subscriber receives events queued before it connected."""
+    queue = EventQueue()
+    event: NodeStartEvent = {
+        "event": "node-start",
+        "data": {"nodeId": NodeId("buffered")},
+    }
+    queue.put(event)
+
+    with queue.subscribe() as sub:
+        assert await sub.get() == event

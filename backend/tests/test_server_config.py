@@ -137,3 +137,37 @@ def test_server_config_multiple_flags():
         assert config.trace is True
     finally:
         sys.argv = original_argv
+
+
+def test_server_config_web_mode_flags():
+    """Test ServerConfig WebUI hardening and CORS flags."""
+    original_argv = sys.argv
+    try:
+        sys.argv = [
+            "server.py",
+            "8080",
+            "--host",
+            "127.0.0.1",
+            "--web-mode",
+            "--allow-package-manage",
+            "--web-root",
+            "/data/chainner",
+            "--cors-origin",
+            "https://chainner.example.com/,https://alt.example.com",
+            "--cors-origin",
+            "http://127.0.0.1:5173",
+        ]
+        config = ServerConfig.parse_argv()
+
+        assert config.port == 8080
+        assert config.host == "127.0.0.1"
+        assert config.web_mode is True
+        assert config.allow_package_manage is True
+        assert config.web_root == "/data/chainner"
+        assert config.cors_origins == (
+            "https://chainner.example.com",
+            "https://alt.example.com",
+            "http://127.0.0.1:5173",
+        )
+    finally:
+        sys.argv = original_argv

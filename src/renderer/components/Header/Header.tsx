@@ -1,5 +1,6 @@
 import { Box, Center, HStack } from '@chakra-ui/react';
 import { memo } from 'react';
+import { WebFileMenu } from '../../../web/WebFileMenu';
 import { DependencyManagerButton } from '../DependencyManagerButton';
 import { NodeDocumentationButton } from '../NodeDocumentation/NodeDocumentationModal';
 import { SettingsButton } from '../SettingsModal';
@@ -21,9 +22,10 @@ export const Header = memo(() => {
             px={2}
             w="full"
         >
-            <Box>
+            <HStack spacing={2}>
                 <AppInfo />
-            </Box>
+                <WebFileMenu />
+            </HStack>
             <Center flexGrow="1">
                 <ExecutionButtons />
             </Center>
